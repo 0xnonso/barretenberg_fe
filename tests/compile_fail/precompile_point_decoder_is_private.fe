@@ -1,0 +1,5 @@
+// expect: not visible
+use ingot::curve::G1
+unsafe fn misuse(_ output: *u8) -> G1 {
+    G1::from_precompile_output(output)
+}

@@ -1,0 +1,191 @@
+use core::ptr::MemArray
+use ingot::field::Fr
+use ingot::proof::{ParsedProof, RelationParameters, Transcript}
+use ingot::types::{Digest256, EncodedG1}
+use ingot::verification_key::MAX_LOG_N
+use std::evm::crypto::{keccak256, keccak_words}
+
+/// Hash exactly COUNT big-endian words, without an ABI offset or length header.
+/// Fe's intrinsic handles packing and hashing; retain the full digest here.
+pub fn hash_words<const COUNT: usize>(_ words: [u256; COUNT]) -> Digest256 {
+    Digest256::from_word(keccak_words(words))
+}
+
+/// A transcript round whose length depends on the circuit. Words are appended
+/// in protocol order into one runtime-sized allocation, then hashed exactly as
+/// Solidity's `abi.encodePacked(bytes32[] memory)`.
+struct Round { words: MemArray<u256>, len: usize }
+
+impl Round {
+    fn new(_ len: usize, _ previous: u256) -> Self {
+        var words = MemArray<u256>::new_zeroed(len)
+        words[0] = previous
+        Self { words, len: 1 }
+    }
+
+    fn push(mut self, _ word: u256) {
+        self.words[self.len] = word
+        self.len += 1
+    }
+
+    fn push_point(mut self, _ point: EncodedG1) {
+        self.push(point.x.to_word())
+        self.push(point.y.to_word())
+    }
+
+    /// Every slot must be filled; a short round would hash trailing zeros.
+    fn challenge(self) -> Fr {
+        assert!(self.len == self.words.len())
+        Digest256::from_word(keccak256(self.words.span())).reduce_to_fr()
+    }
+}
+
+pub fn eta_challenges(_ p: ParsedProof, _ inputs: ref MemArray<Fr>, _ vk_hash: u256) -> (Fr, Fr) {
+    // vk hash, application inputs, 8 accumulator limbs, 4 commitments.
+    var round = Round::new(inputs.len() + 17, vk_hash)
+    for i in 0 .. inputs.len() {
+        round.push(inputs[i].to_word())
+    }
+    for limb in p.accumulator {
+        round.push(limb.to_word())
+    }
+    round.push_point(p.gemini_masking_poly)
+    round.push_point(p.w1)
+    round.push_point(p.w2)
+    round.push_point(p.w3)
+    let eta = round.challenge()
+    (eta, challenge([eta.to_word()]))
+}
+
+pub fn beta_gamma(_ previous: Fr, _ p: ParsedProof) -> (Fr, Fr) {
+    let beta = challenge(
+        [
+            previous.to_word(),
+            p.lookup_read_counts.x.to_word(),
+            p.lookup_read_counts.y.to_word(),
+            p.lookup_read_tags.x.to_word(),
+            p.lookup_read_tags.y.to_word(),
+            p.w4.x.to_word(),
+            p.w4.y.to_word(),
+        ],
+    )
+    (beta, challenge([beta.to_word()]))
+}
+
+pub fn alpha_challenges(_ previous: Fr, _ p: ParsedProof, _ powers: mut [Fr; 30]) {
+    let alpha = challenge(
+        [
+            previous.to_word(),
+            p.lookup_inverses.x.to_word(),
+            p.lookup_inverses.y.to_word(),
+            p.z_perm.x.to_word(),
+            p.z_perm.y.to_word(),
+        ],
+    )
+    powers[0] = alpha
+    for i in 1 .. 30 {
+        powers[i] = powers[i - 1] * alpha
+    }
+}
+
+pub fn gate_challenges(_ previous: Fr, _ log_n: usize, _ gates: mut [Fr; MAX_LOG_N]) {
+    ingot::verification_key::require_supported_log_n(log_n)
+    gates[0] = challenge([previous.to_word()])
+    for i in 1 .. log_n {
+        gates[i] = gates[i - 1] * gates[i - 1]
+    }
+}
+
+pub fn libra_challenge(_ previous: Fr, _ p: ParsedProof) -> Fr {
+    challenge(
+        [
+            previous.to_word(),
+            p.libra_commitments[0].x.to_word(),
+            p.libra_commitments[0].y.to_word(),
+            p.libra_sum.to_word(),
+        ],
+    )
+}
+
+pub fn sumcheck_challenges(_ previous: Fr, _ p: ParsedProof, _ challenges: mut [Fr; MAX_LOG_N]) {
+    ingot::verification_key::require_supported_log_n(p.log_n)
+    var state = previous
+    for i in 0 .. p.log_n {
+        var words = ingot::arrays::zero_array<u256, 10>()
+        words[0] = state.to_word()
+        for j in 0 .. 9 {
+            words[j + 1] = p.sumcheck_univariates[i][j].to_word()
+        }
+        state = challenge(words)
+        challenges[i] = state
+    }
+}
+
+pub fn opening_challenges(_ previous: Fr, _ p: ParsedProof) -> (Fr, Fr, Fr, Fr) {
+    ingot::verification_key::require_supported_log_n(p.log_n)
+    var rho_words = ingot::arrays::zero_array<u256, 48>()
+    rho_words[0] = previous.to_word()
+    for i in 0 .. 42 {
+        rho_words[i + 1] = p.evaluations[i].to_word()
+    }
+    rho_words[43] = p.libra_evaluation.to_word()
+    rho_words[44] = p.libra_commitments[1].x.to_word()
+    rho_words[45] = p.libra_commitments[1].y.to_word()
+    rho_words[46] = p.libra_commitments[2].x.to_word()
+    rho_words[47] = p.libra_commitments[2].y.to_word()
+    let rho = challenge(rho_words)
+    var gemini = Round::new(2 * p.log_n - 1, rho.to_word())
+    for i in 0 .. p.log_n - 1 {
+        gemini.push_point(p.gemini_fold_comms[i])
+    }
+    let r = gemini.challenge()
+    var nu = Round::new(p.log_n + 5, r.to_word())
+    for i in 0 .. p.log_n {
+        nu.push(p.gemini_a_evaluations[i].to_word())
+    }
+    for evaluation in p.libra_poly_evals {
+        nu.push(evaluation.to_word())
+    }
+    let nu = nu.challenge()
+    let z = challenge(
+        [nu.to_word(), p.shplonk_q.x.to_word(), p.shplonk_q.y.to_word()],
+    )
+    (rho, r, nu, z)
+}
+
+/// Every Fiat-Shamir challenge in protocol order, written into `t` in place.
+#[inline(never)]
+pub fn generate_transcript(
+    _ p: ParsedProof,
+    _ inputs: ref MemArray<Fr>,
+    _ vk_hash: u256,
+    _ t: mut Transcript,
+) {
+    ingot::verification_key::require_supported_log_n(p.log_n)
+    let (eta, rom_logup_gamma) = eta_challenges(p, inputs, vk_hash)
+    let (beta, gamma) = beta_gamma(rom_logup_gamma, p)
+    t.relation_parameters = RelationParameters {
+        eta,
+        rom_logup_gamma,
+        beta,
+        gamma,
+        public_inputs_delta: Fr::zero(),
+    }
+    alpha_challenges(gamma, p, mut t.alphas)
+    // The next state is alpha, not the final power of alpha.
+    gate_challenges(t.alphas[0], p.log_n, mut t.gate_challenges)
+    t.libra_challenge = libra_challenge(t.gate_challenges[0], p)
+    sumcheck_challenges(t.libra_challenge, p, mut t.sumcheck_challenges)
+    let (rho, gemini_r, shplonk_nu, shplonk_z) = opening_challenges(
+        t.sumcheck_challenges[p.log_n - 1],
+        p,
+    )
+    t.rho = rho
+    t.gemini_r = gemini_r
+    t.shplonk_nu = shplonk_nu
+    t.shplonk_z = shplonk_z
+}
+
+fn challenge<const COUNT: usize>(_ words: [u256; COUNT]) -> Fr {
+    hash_words(words).reduce_to_fr()
+}

@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: Apache-2.0
+// Port of Aztec Labs (2024) pinned Relations.sol: accumulateArithmeticRelation.
+use ingot::entities::{
+    Q_4,
+    Q_ARITH,
+    Q_C,
+    Q_L,
+    Q_M,
+    Q_O,
+    Q_R,
+    W_4,
+    W_4_SHIFT,
+    W_L,
+    W_L_SHIFT,
+    W_O,
+    W_R,
+}
+use ingot::field::{Fr, scalar_constant}
+
+#[inline(never)]
+pub fn accumulate(_ p: [Fr; 41], _ evals: mut [Fr; 31], _ domain_sep: Fr) {
+    let q_arith = p[Q_ARITH]
+    {
+        let neg_half = scalar_constant(
+            0x183227397098d014dc2822db40c0ac2e9419f4243cdcb848a1f0fac9f8000000,
+        )
+        var accum = (q_arith - scalar_constant(3)) * (p[Q_M] * p[W_R] * p[W_L]) * neg_half
+        accum = accum
+            + (p[Q_L] * p[W_L])
+            + (p[Q_R] * p[W_R])
+            + (p[Q_O] * p[W_O])
+            + (p[Q_4] * p[W_4])
+            + p[Q_C]
+        accum = accum + (q_arith - Fr::one()) * p[W_4_SHIFT]
+        accum = accum * q_arith
+        accum = accum * domain_sep
+        evals[6] = accum
+    }
+    {
+        var accum = p[W_L] + p[W_4] - p[W_L_SHIFT] + p[Q_M]
+        accum = accum * (q_arith - scalar_constant(2))
+        accum = accum * (q_arith - Fr::one())
+        accum = accum * q_arith
+        accum = accum * domain_sep
+        evals[7] = accum
+    }
+}

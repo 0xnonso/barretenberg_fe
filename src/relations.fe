@@ -1,0 +1,85 @@
+// SPDX-License-Identifier: Apache-2.0
+// Subrelation slots and batching match pinned Aztec Relations.sol.
+use ingot::arrays::Buffer
+use ingot::field::{Fr, scalar_constant}
+use ingot::proof::RelationParameters
+use ingot::relations::{
+    arithmetic,
+    permutation,
+    lookup,
+    range,
+    elliptic,
+    memory,
+    rom,
+    nnf,
+    poseidon_external,
+    poseidon_internal,
+}
+use std::abi::{Bytes, sol}
+
+/// Accumulate all 31 subrelations into `evaluations`, which must start zeroed.
+pub fn evaluate(
+    _ values: [Fr; 41],
+    _ parameters: RelationParameters,
+    _ gate_weight: Fr,
+    _ evaluations: mut [Fr; 31],
+) {
+    arithmetic::accumulate(values, mut evaluations, gate_weight)
+    permutation::accumulate(values, parameters, mut evaluations, gate_weight)
+    lookup::accumulate(values, parameters, mut evaluations, gate_weight)
+    range::accumulate(values, mut evaluations, gate_weight)
+    elliptic::accumulate(values, mut evaluations, gate_weight)
+    memory::accumulate(values, parameters, mut evaluations, gate_weight)
+    rom::accumulate(values, parameters, mut evaluations, gate_weight)
+    nnf::accumulate(values, mut evaluations, gate_weight)
+    poseidon_external::accumulate(values, mut evaluations, gate_weight)
+    poseidon_internal::accumulate(values, mut evaluations, gate_weight)
+}
+
+pub fn batch(_ evaluations: [Fr; 31], _ alphas: [Fr; 30]) -> Fr {
+    var sum = evaluations[0]
+    for i in 1 .. 31 {
+        sum = sum + evaluations[i] * alphas[i - 1]
+    }
+    sum
+}
+
+/// Words in a RelationsLib call: 41 entities, 5 parameters, 30 alphas, gate weight.
+pub const RELATION_INPUT_WORDS: usize = 77
+
+/// One packed payload: fixed-size ABI arrays would decode word by word in code.
+pub msg RelationCalls {
+    #[selector = sol("accumulateRelationEvaluations(bytes)")]
+    Accumulate { inputs: Bytes } -> u256,
+}
+
+struct RelationState { values: [Fr; 41], alphas: [Fr; 30], evaluations: [Fr; 31] }
+
+/// The subrelations as their own contract, like Solidity's linked RelationsLib.
+/// The verifier's constructor deploys it, so its code does not count toward the
+/// verifier's EIP-170 budget. Callers pass canonical Fr words.
+pub contract RelationsLib {
+    recv RelationCalls {
+        Accumulate { inputs } -> u256 {
+            assert!(inputs.len() == 32 * RELATION_INPUT_WORDS)
+            var buffer = Buffer<RelationState>::new()
+            let state = mut buffer.get()
+            for i in 0 .. 41 {
+                state.values[i] = scalar_constant(inputs.word_at(32 * i))
+            }
+            for i in 0 .. 30 {
+                state.alphas[i] = scalar_constant(inputs.word_at(32 * (46 + i)))
+            }
+            let rp = RelationParameters {
+                eta: scalar_constant(inputs.word_at(32 * 41)),
+                rom_logup_gamma: scalar_constant(inputs.word_at(32 * 42)),
+                beta: scalar_constant(inputs.word_at(32 * 43)),
+                gamma: scalar_constant(inputs.word_at(32 * 44)),
+                public_inputs_delta: scalar_constant(inputs.word_at(32 * 45)),
+            }
+            let gate_weight = scalar_constant(inputs.word_at(32 * 76))
+            evaluate(state.values, rp, gate_weight, mut state.evaluations)
+            batch(state.evaluations, state.alphas).to_word()
+        }
+    }
+}

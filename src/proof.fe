@@ -1,0 +1,54 @@
+// Typed UltraHonk ZK payload. Round-indexed arrays have MAX_LOG_N capacity;
+// only the first `log_n` entries are read from the proof or used.
+use ingot::field::Fr
+use ingot::types::EncodedG1
+use ingot::verification_key::MAX_LOG_N
+
+pub struct ParsedProof {
+    pub log_n: usize,
+    pub accumulator: [Fr; 8],
+    pub gemini_masking_poly: EncodedG1,
+    pub w1: EncodedG1,
+    pub w2: EncodedG1,
+    pub w3: EncodedG1,
+    pub w4: EncodedG1,
+    pub lookup_read_counts: EncodedG1,
+    pub lookup_read_tags: EncodedG1,
+    pub lookup_inverses: EncodedG1,
+    pub z_perm: EncodedG1,
+    pub libra_commitments: [EncodedG1; 3],
+    pub libra_sum: Fr,
+    pub sumcheck_univariates: [[Fr; 9]; MAX_LOG_N],
+    // Masking evaluation at index 0; WIRE entities start at index 1.
+    pub evaluations: [Fr; 42],
+    pub libra_evaluation: Fr,
+    pub gemini_fold_comms: [EncodedG1; MAX_LOG_N - 1],
+    pub gemini_a_evaluations: [Fr; MAX_LOG_N],
+    pub libra_poly_evals: [Fr; 4],
+    pub shplonk_q: EncodedG1,
+    pub kzg_quotient: EncodedG1,
+}
+
+pub struct RelationParameters {
+    pub eta: Fr,
+    pub rom_logup_gamma: Fr,
+    pub beta: Fr,
+    pub gamma: Fr,
+    pub public_inputs_delta: Fr,
+}
+
+impl Copy for RelationParameters {}
+
+pub struct Transcript {
+    pub relation_parameters: RelationParameters,
+    pub alphas: [Fr; 30],
+    pub gate_challenges: [Fr; MAX_LOG_N],
+    pub libra_challenge: Fr,
+    pub sumcheck_challenges: [Fr; MAX_LOG_N],
+    pub rho: Fr,
+    pub gemini_r: Fr,
+    pub shplonk_nu: Fr,
+    pub shplonk_z: Fr,
+}
+
+pub type ProofBuffer = ingot::arrays::Buffer<ParsedProof>

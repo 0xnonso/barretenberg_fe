@@ -1,0 +1,80 @@
+use core::result::Result
+use ingot::curve::{CurveError, G1, PairingTerm, pairing_check}
+use ingot::field::Fq
+use ingot::types::{EncodedG1, EncodedG2, Fq2}
+use std::evm::{Call, Ctx}
+
+#[test]
+fn pairing_opposite_points_cancel() uses (call: Call, ctx: Ctx) {
+    let g = point(1, 2)
+    assert!(
+        checked(
+            pairing_check(
+                PairingTerm { g1: g, g2: generator() },
+                PairingTerm { g1: g.negate(), g2: generator() },
+            ),
+        ),
+    )
+}
+
+#[test]
+fn pairing_false_is_a_successful_call() uses (call: Call, ctx: Ctx) {
+    let term = PairingTerm { g1: point(1, 2), g2: generator() }
+    assert!(!checked(pairing_check(term, term)))
+}
+
+#[test]
+fn pairing_accepts_identity_in_either_group() uses (call: Call, ctx: Ctx) {
+    let zero = Fq2 { imag: coordinate(0), real: coordinate(0) }
+    assert!(
+        checked(
+            pairing_check(
+                PairingTerm { g1: point(0, 0), g2: generator() },
+                PairingTerm { g1: point(1, 2), g2: EncodedG2 { x: zero, y: zero } },
+            ),
+        ),
+    )
+}
+
+fn generator() -> EncodedG2 {
+    // EIP-197 generator: imaginary component first, real component second.
+    EncodedG2 {
+        x: Fq2 {
+            imag: coordinate(
+                11559732032986387107991004021392285783925812861821192530917403151452391805634,
+            ),
+            real: coordinate(
+                10857046999023057135944570762232829481370756359578518086990519993285655852781,
+            ),
+        },
+        y: Fq2 {
+            imag: coordinate(
+                4082367875863433681332203403145435568316851327593401208105741076214120093531,
+            ),
+            real: coordinate(
+                8495653923123431417604973247489272438418190587263600148770280649306958101930,
+            ),
+        },
+    }
+}
+
+fn coordinate(_ word: u256) -> Fq {
+    match Fq::from_word(word) {
+        Result::Ok(value) => value,
+        Result::Err(_) => core::panic(),
+    }
+}
+
+fn point(_ x: u256, _ y: u256) -> G1 {
+    match G1::from_encoded(EncodedG1 { x: coordinate(x), y: coordinate(y) }) {
+        Result::Ok(value) => value,
+        Result::Err(_) => core::panic(),
+    }
+}
+
+fn checked(_ result: Result<CurveError, bool>) -> bool {
+    match result {
+        Result::Ok(value) => value,
+        Result::Err(_) => core::panic(),
+    }
+}

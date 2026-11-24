@@ -1,0 +1,43 @@
+use barretenberg_fe::field::Fr
+use barretenberg_fe::proof::RelationParameters
+use barretenberg_fe::relations::{evaluate, batch}
+use ingot::support::scalar
+
+msg RelationCalls {
+    #[selector = sol("relations(uint256[41],uint256[5],uint256,uint256[30])")]
+    Relations {
+        values: [u256; 41],
+        parameters: [u256; 5],
+        gate_weight: u256,
+        alphas: [u256; 30],
+    } -> ([u256; 31], u256),
+}
+
+pub contract RelationsProbe {
+    recv RelationCalls {
+        Relations { values, parameters, gate_weight, alphas } -> ([u256; 31], u256) {
+            var entities = [Fr::zero(); 41]
+            for i in 0 .. 41 {
+                entities[i] = scalar(values[i])
+            }
+            let rp = RelationParameters {
+                eta: scalar(parameters[0]),
+                rom_logup_gamma: scalar(parameters[1]),
+                beta: scalar(parameters[2]),
+                gamma: scalar(parameters[3]),
+                public_inputs_delta: scalar(parameters[4]),
+            }
+            var weights = [Fr::zero(); 30]
+            for i in 0 .. 30 {
+                weights[i] = scalar(alphas[i])
+            }
+            var evaluations = [Fr::zero(); 31]
+            evaluate(entities, rp, scalar(gate_weight), mut evaluations)
+            var words = [0; 31]
+            for i in 0 .. 31 {
+                words[i] = evaluations[i].to_word()
+            }
+            (words, batch(evaluations, weights).to_word())
+        }
+    }
+}

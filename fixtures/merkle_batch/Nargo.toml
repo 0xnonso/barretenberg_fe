@@ -1,0 +1,6 @@
+[package]
+name = "merkle_batch"
+type = "bin"
+authors = [""]
+
+[dependencies]

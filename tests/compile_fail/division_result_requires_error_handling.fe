@@ -1,0 +1,6 @@
+// expect: type mismatch
+use ingot::field::Fr
+use std::evm::{Call, Ctx}
+fn misuse(_ a: Fr, _ b: Fr) -> Fr uses (call: Call, ctx: Ctx) {
+    a.divide(b)
+}

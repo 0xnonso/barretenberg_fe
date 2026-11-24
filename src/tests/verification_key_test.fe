@@ -1,0 +1,46 @@
+use core::result::Result
+use ingot::circuit::verification_key
+use ingot::curve::G1
+use ingot::encoding::proof_bytes
+use ingot::verification_key::{MAX_LOG_N, MSM_CAPACITY}
+
+#[test]
+fn development_key_dimensions_and_points_are_valid() {
+    let key = verification_key()
+    assert!(key.is_supported())
+    assert!(key.log_n == 5 && key.application_inputs == 1)
+    assert!(proof_bytes(key.log_n) == 4544 && key.msm_size() == 47)
+    assert!(MAX_LOG_N == 25 && MSM_CAPACITY == 67)
+    for point in key.commitments {
+        match G1::from_encoded(point) {
+            Result::Ok(_) => {},
+            Result::Err(_) => core::panic(),
+        }
+    }
+}
+
+#[test]
+fn key_bounds_match_solidity_capacity() {
+    var key = verification_key()
+    key.log_n = MAX_LOG_N
+    assert!(key.is_supported())
+    key.log_n = MAX_LOG_N + 1
+    assert!(!key.is_supported())
+    key.log_n = 1
+    assert!(!key.is_supported())
+    // Inputs plus eight accumulator limbs must fit below 2^log_n rows.
+    key.log_n = 4
+    key.application_inputs = 7
+    assert!(key.is_supported())
+    key.application_inputs = 8
+    assert!(!key.is_supported())
+    key.application_inputs = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+    assert!(!key.is_supported())
+    key.application_inputs = 0
+    key.log_n = 0
+    assert!(!key.is_supported())
+    key.log_n = 2
+    assert!(!key.is_supported())
+    key.log_n = 3
+    assert!(!key.is_supported())
+}

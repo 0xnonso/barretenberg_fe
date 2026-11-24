@@ -1,0 +1,8 @@
+# Test-only contracts exposing production verifier stages to the Forge
+# differential tests. They are not verifiers.
+[ingot]
+name = "probes"
+version = "0.1.0"
+
+[dependencies]
+barretenberg_fe = { path = "../..", allow_unsafe = true }

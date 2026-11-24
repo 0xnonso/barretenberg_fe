@@ -1,0 +1,5 @@
+// expect: not visible
+use ingot::field::Fr
+fn misuse() -> Fr {
+    Fr { value: 0 }
+}

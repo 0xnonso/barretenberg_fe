@@ -1,0 +1,65 @@
+use barretenberg_fe::public_inputs::public_input_delta
+use barretenberg_fe::relations::RelationsLib
+use barretenberg_fe::sumcheck::{check_rounds, verify_sumcheck}
+use core::result::Result
+use ingot::support::{decode, single_input, transcript}
+use std::abi::{Bytes, Bytes32, DynArray}
+use std::evm::units::Wei
+use std::evm::{Address, Create, Call, Ctx, revert_empty}
+
+msg SumcheckCalls {
+    #[selector = sol("check(bytes,bytes32[])")]
+    Check { data: Bytes, inputs: DynArray<Bytes32> } -> bool,
+}
+
+pub contract SumcheckProbe uses (call: Call, ctx: Ctx) {
+    relations: Address,
+
+    init()
+    uses (mut relations, create: mut Create)
+    {
+        relations = create.create<RelationsLib>(value: Wei::zero(), args: ())
+    }
+
+    recv SumcheckCalls {
+        Check { data, inputs } -> bool uses (relations, call, ctx) {
+            let public_inputs = single_input(inputs)
+            let decoded = decode(data)
+            let p = ref decoded.get()
+            var transcript = transcript(p, ref public_inputs)
+            let t = mut transcript.get()
+            t.relation_parameters.public_inputs_delta = match public_input_delta(
+                ref public_inputs,
+                p.accumulator,
+                t.relation_parameters.beta,
+                t.relation_parameters.gamma,
+            ) {
+                Result::Ok(value) => value,
+                Result::Err(_) => revert_empty(),
+            }
+            verify_sumcheck(p, t, relations)
+        }
+    }
+}
+
+msg RoundCalls {
+    #[selector = sol("rounds(bytes,bytes32[])")]
+    Rounds { data: Bytes, inputs: DynArray<Bytes32> } -> (u256, u256),
+}
+pub contract RoundsProbe uses (call: Call, ctx: Ctx) {
+    recv RoundCalls {
+        Rounds { data, inputs } -> (u256, u256) uses (call, ctx) {
+            let public_inputs = single_input(inputs)
+            let decoded = decode(data)
+            let p = ref decoded.get()
+            let transcript = transcript(p, ref public_inputs)
+            match check_rounds(p, transcript.get()) {
+                Result::Ok((target, gate)) => match target.evaluate() {
+                    Result::Ok(value) => (value.to_word(), gate.to_word()),
+                    Result::Err(_) => revert_empty(),
+                },
+                Result::Err(_) => revert_empty(),
+            }
+        }
+    }
+}

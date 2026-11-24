@@ -1,0 +1,5 @@
+[package]
+name = "range_hash"
+type = "bin"
+authors = [""]
+[dependencies]

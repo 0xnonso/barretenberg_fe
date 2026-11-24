@@ -1,0 +1,26 @@
+# Generated build output
+/target/
+# Fe can also emit out/ inside nested ingots such as tests/probes/.
+out/
+/cache/
+/artifacts/
+*.log
+
+# Local secrets and OS files
+.env
+.env.*
+!.env.example
+.DS_Store
+.tools/
+.fe-lsp/
+.fe-lsp.json
+/output/
+/.vscode/fe_output/
+/fixtures/*/target/
+
+# Python tooling
+__pycache__/
+.venv/
+.ruff_cache/
+
+# Keep intentional proof/VK fixtures tracked.

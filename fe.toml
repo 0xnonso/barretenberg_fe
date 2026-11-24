@@ -1,0 +1,4 @@
+# The verifier ingot; see README.md. Pinned compiler: toolchain.lock.json.
+[ingot]
+name = "barretenberg_fe"
+version = "0.1.0"

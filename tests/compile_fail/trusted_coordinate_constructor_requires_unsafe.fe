@@ -1,0 +1,5 @@
+// expect: unsafe
+use ingot::field::Fq
+fn misuse() -> Fq {
+    Fq::from_canonical_word_unchecked(0)
+}

@@ -1,0 +1,44 @@
+use core::result::Result
+use ingot::arrays::Buffer
+use ingot::field::{FieldArithmeticError, Fr, Fraction}
+use std::evm::{Call, Ctx}
+
+#[test]
+fn invalid_fractions_never_compare_equal() {
+    let invalid = Fraction::from(Fr::zero()).add_quotient(Fr::zero(), Fr::zero())
+    assert!(!invalid.equals(Fr::zero()))
+    assert!(!invalid.equals(Fr::one()))
+    let composed = invalid.add_quotient(Fr::one(), Fr::one()).scale(Fr::zero())
+    assert!(!composed.equals(Fr::zero()))
+    let zeroed = Buffer<Fraction>::new()
+    assert!(!zeroed.get().equals(Fr::zero()))
+}
+
+#[test]
+fn zero_denominator_evaluation_returns_a_typed_error()
+uses (call: Call, ctx: Ctx)
+{
+    let invalid = Fraction::from(Fr::one()).add_quotient(Fr::one(), Fr::zero())
+    match invalid.evaluate() {
+        Result::Err(FieldArithmeticError::ZeroInverse) => {},
+        _ => core::panic(),
+    }
+}
+
+#[test]
+fn valid_fraction_composition_and_zero_numerators_work()
+uses (call: Call, ctx: Ctx)
+{
+    let two = Fr::one() + Fr::one()
+    let three = two + Fr::one()
+    let value = Fraction::from(Fr::one()).add_quotient(Fr::one(), two).scale(two)
+    assert!(value.equals(three))
+    assert!(!value.equals(two))
+    match value.evaluate() {
+        Result::Ok(result) => assert!(result == three),
+        _ => core::panic(),
+    }
+    let zero = value.scale(Fr::zero())
+    assert!(zero.equals(Fr::zero()))
+    assert!(zero.add_quotient(Fr::zero(), two).equals(Fr::zero()))
+}

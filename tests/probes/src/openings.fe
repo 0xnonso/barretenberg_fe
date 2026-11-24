@@ -1,0 +1,99 @@
+use barretenberg_fe::arrays::Buffer
+use barretenberg_fe::circuit::verification_key
+use barretenberg_fe::commitments::{squares, fold_evaluations, opening_terms}
+use barretenberg_fe::field::Fr
+use barretenberg_fe::libra::check_consistency
+use barretenberg_fe::types::MsmTerm
+use barretenberg_fe::verification_key::{MAX_LOG_N, MSM_CAPACITY}
+use ingot::support::{LOG_N, decode, single_input, transcript, scalar}
+use std::abi::{Bytes, Bytes32, DynArray}
+use std::evm::{Call, Ctx}
+
+msg OpeningCalls {
+    #[selector = sol("terms(bytes,bytes32[])")]
+    Terms { data: Bytes, inputs: DynArray<Bytes32> } -> [u256; 141],
+}
+
+pub contract OpeningProbe uses (call: Call, ctx: Ctx) {
+    recv OpeningCalls {
+        Terms { data, inputs } -> [u256; 141] uses (call, ctx) {
+            let public_inputs = single_input(inputs)
+            let decoded = decode(data)
+            let p = ref decoded.get()
+            let transcript = transcript(p, ref public_inputs)
+            var buffer = Buffer<[MsmTerm; MSM_CAPACITY]>::new()
+            let terms = mut buffer.get()
+            opening_terms(p, verification_key(), transcript.get(), mut terms)
+            var words = [0; 141]
+            for i in 0 .. 47 {
+                words[3 * i] = terms[i].point.x.to_word()
+                words[3 * i + 1] = terms[i].point.y.to_word()
+                words[3 * i + 2] = terms[i].scalar.to_word()
+            }
+            words
+        }
+    }
+}
+
+msg GeminiCalls {
+    #[selector = sol("fold(uint256[5],uint256,uint256[5],uint256)")]
+    Fold { u: [u256; 5], batched: u256, negative: [u256; 5], r: u256 } -> ([u256; 5], [u256; 5]),
+}
+
+pub contract GeminiProbe uses (call: Call, ctx: Ctx) {
+    recv GeminiCalls {
+        Fold { u, batched, negative, r } -> ([u256; 5], [u256; 5])
+        uses (call, ctx)
+        {
+            var challenges = [Fr::zero(); MAX_LOG_N]
+            var evaluations = [Fr::zero(); MAX_LOG_N]
+            for i in 0 .. 5 {
+                challenges[i] = scalar(u[i])
+            }
+            for i in 0 .. 5 {
+                evaluations[i] = scalar(negative[i])
+            }
+            var powers = [Fr::zero(); MAX_LOG_N]
+            var positive = [Fr::zero(); MAX_LOG_N]
+            squares(scalar(r), LOG_N, mut powers)
+            fold_evaluations(
+                challenges,
+                scalar(batched),
+                evaluations,
+                powers,
+                LOG_N,
+                mut positive,
+            )
+            var power_words = [0; 5]
+            var positive_words = [0; 5]
+            for i in 0 .. 5 {
+                power_words[i] = powers[i].to_word()
+                positive_words[i] = positive[i].to_word()
+            }
+            (power_words, positive_words)
+        }
+    }
+}
+
+msg LibraCalls {
+    #[selector = sol("libra(uint256[4],uint256,uint256[5],uint256)")]
+    Libra { evaluations: [u256; 4], r: u256, u: [u256; 5], claimed: u256 } -> bool,
+}
+
+pub contract LibraProbe uses (call: Call, ctx: Ctx) {
+    recv LibraCalls {
+        Libra { evaluations, r, u, claimed } -> bool
+        uses (call, ctx)
+        {
+            var evals = [Fr::zero(); 4]
+            var challenges = [Fr::zero(); MAX_LOG_N]
+            for i in 0 .. 4 {
+                evals[i] = scalar(evaluations[i])
+            }
+            for i in 0 .. 5 {
+                challenges[i] = scalar(u[i])
+            }
+            check_consistency(evals, scalar(r), ref challenges, LOG_N, scalar(claimed))
+        }
+    }
+}

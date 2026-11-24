@@ -1,0 +1,6 @@
+// expect: type mismatch
+use ingot::curve::{PairingTerm, pairing_check}
+use std::evm::{Call, Ctx}
+fn misuse(_ a: PairingTerm) -> bool uses (call: Call, ctx: Ctx) {
+    pairing_check(a, a)
+}

@@ -1,0 +1,100 @@
+use core::result::Result
+use ingot::curve::{CurveError, G1}
+use ingot::field::{FQ_MODULUS, FR_MODULUS, Fq, Fr}
+use ingot::types::EncodedG1
+use std::evm::{Call, Ctx}
+
+#[test]
+fn curve_validation_distinguishes_encoding_from_membership() {
+    assert!(point(0, 0).is_identity())
+    assert!(!point(1, 2).is_identity())
+    let invalid = [[1, 1], [0, 1], [1, 0], [0, 2], [FQ_MODULUS - 1, 2]]
+    for pair in invalid {
+        match G1::from_encoded(encoded(pair[0], pair[1])) {
+            Result::Err(CurveError::InvalidPoint) => {},
+            _ => core::panic(),
+        }
+    }
+}
+
+#[test]
+fn curve_negation_preserves_identity_and_is_an_involution() {
+    let identity = point(0, 0)
+    assert!(identity.negate() == identity)
+    let g = point(1, 2)
+    assert!(g.negate() == point(1, FQ_MODULUS - 2))
+    assert!(g.negate().negate() == g)
+    assert!(coordinate(0).negate().to_word() == 0)
+    assert!(coordinate(FQ_MODULUS - 1).negate().to_word() == 1)
+}
+
+#[test]
+fn curve_addition_matches_independent_double_generator()
+uses (call: Call, ctx: Ctx)
+{
+    let g = point(1, 2)
+    // Affine doubling computed independently with Python modular arithmetic.
+    let expected = point(
+        1368015179489954701390400359078579693043519447331113978918064868415326638035,
+        9918110051302171585080402603319702774565515993150576347155970296011118125764,
+    )
+    assert!(checked(g.add(g)) == expected)
+    assert!(checked(g.mul(scalar(2))) == expected)
+}
+
+#[test]
+fn curve_identity_and_inverse_addition() uses (call: Call, ctx: Ctx) {
+    let g = point(1, 2)
+    let identity = point(0, 0)
+    assert!(checked(g.add(identity)) == g)
+    assert!(checked(identity.add(g)) == g)
+    assert!(checked(identity.add(identity)) == identity)
+    assert!(checked(g.add(g.negate())).is_identity())
+}
+
+#[test]
+fn curve_scalar_zero_one_and_order_minus_one() uses (call: Call, ctx: Ctx) {
+    let g = point(1, 2)
+    assert!(checked(g.mul(Fr::zero())).is_identity())
+    assert!(checked(g.mul(Fr::one())) == g)
+    assert!(checked(g.mul(scalar(FR_MODULUS - 1))) == g.negate())
+    assert!(checked(point(0, 0).mul(scalar(7))).is_identity())
+}
+
+#[test]
+fn curve_addition_and_multiplication_compose() uses (call: Call, ctx: Ctx) {
+    let g = point(1, 2)
+    let twice = checked(g.mul(scalar(2)))
+    let thrice = checked(g.mul(scalar(3)))
+    assert!(checked(twice.add(thrice)) == checked(g.mul(scalar(5))))
+    assert!(checked(twice.mul(scalar(3))) == checked(g.mul(scalar(6))))
+}
+
+fn coordinate(_ word: u256) -> Fq {
+    match Fq::from_word(word) {
+        Result::Ok(value) => value,
+        Result::Err(_) => core::panic(),
+    }
+}
+
+fn scalar(_ word: u256) -> Fr {
+    match Fr::from_word(word) {
+        Result::Ok(value) => value,
+        Result::Err(_) => core::panic(),
+    }
+}
+
+fn encoded(_ x: u256, _ y: u256) -> EncodedG1 {
+    EncodedG1 { x: coordinate(x), y: coordinate(y) }
+}
+
+fn point(_ x: u256, _ y: u256) -> G1 {
+    checked(G1::from_encoded(encoded(x, y)))
+}
+
+fn checked(_ result: Result<CurveError, G1>) -> G1 {
+    match result {
+        Result::Ok(point) => point,
+        Result::Err(_) => core::panic(),
+    }
+}

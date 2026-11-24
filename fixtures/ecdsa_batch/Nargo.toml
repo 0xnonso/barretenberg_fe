@@ -1,0 +1,6 @@
+[package]
+name = "ecdsa_batch"
+type = "bin"
+authors = [""]
+
+[dependencies]

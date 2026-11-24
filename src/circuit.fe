@@ -1,0 +1,267 @@
+// Development key: fixtures/arithmetic. Generation replaces this module.
+// Only the constructor reads this; the runtime verifier is circuit-independent.
+use ingot::field::coordinate_constant
+use ingot::types::EncodedG1
+use ingot::verification_key::VerificationKey
+
+pub fn verification_key() -> VerificationKey {
+    VerificationKey {
+        log_n: 5,
+        application_inputs: 9 - 8,
+        hash: 0x1870740b6da624e11a052caeec6505ff8091cbfa31051beaf0652d70bb5d6883,
+        commitments: [
+            // s1
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x20f888abee9e3c0af6fc5917cfd41762ba0b1fe5740f4d7111c0c52e75a09742,
+                ),
+                y: coordinate_constant(
+                    0x29b7b0a4010978a7d582434fa3fa34f1ae4a42686aa1d7c6b42399546cb6129f,
+                ),
+            },
+            // s2
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x2c307054cc7445f35799d4d5bb79670ecebf86cbf548156821b26fd58f28f3c5,
+                ),
+                y: coordinate_constant(
+                    0x22ca6b693bc32b42f0d2685388fc01399a157e992b471a1f33a9d837bdd7ecc3,
+                ),
+            },
+            // s3
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x11dc2850e81b07e4a80c3f52ee075a5bf69f71ee29bc2641239ed2076578de2e,
+                ),
+                y: coordinate_constant(
+                    0x056f2d8bf653c0560963d47a0022fb26fb8607d3af75488a3c0b628a72c33b36,
+                ),
+            },
+            // s4
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x2812d8b4841bf915c6e5df13ca430f7dfddaed8c09802fbeca36afb3a3ccbaf1,
+                ),
+                y: coordinate_constant(
+                    0x0d935efcb4ef6e1a5555cd15ed54ea976b9d13e36e05b2d31fde17340c99dbc5,
+                ),
+            },
+            // id1
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x016d22a74af7bd17cc64339b2d5df161803abaa783c70e45be5f1f6f69aa06de,
+                ),
+                y: coordinate_constant(
+                    0x01b9114f14b6d80f330864f85823b9fc9e1274f1dffdf5f85acf47f18a36df09,
+                ),
+            },
+            // id2
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x139ffe5ed0855945caea03a522c5f582d98be8ed4081cd9b9eee2cec706fbde2,
+                ),
+                y: coordinate_constant(
+                    0x094a48f9c6f2df8e08047e28c2429153cadfad5bc540280d3a5d295fe3776134,
+                ),
+            },
+            // id3
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x1e26e4ba1eec49e731c0328fba30ef1ae7251f2a357e588d6940a61949f0c835,
+                ),
+                y: coordinate_constant(
+                    0x2df4cfcbb2858cf8208191530f4b9e30aa1ce379bb26b42b5a560d0439aa2743,
+                ),
+            },
+            // id4
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x2f7664ddc96fc892457f1f0948448b5b6d1d081b09061a3ead5312dfa2d53dd0,
+                ),
+                y: coordinate_constant(
+                    0x07ac888de8de384ed6775beea0fc9b6daa56c6a2d79456789268fe4ede3eb02c,
+                ),
+            },
+            // lagrange_first
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x2a56ce41f6b0be13b9c26747621b821eee81b23a887f299049b14c11e98460d6,
+                ),
+                y: coordinate_constant(
+                    0x1aa98f2de3ddda547d8f6de4e725ded5827d6338c78656c0d12ca1aea6ef2c7c,
+                ),
+            },
+            // lagrange_last
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x13240f97a584b45184c8ec31319b5f6c04ee19ec1dfec87ed47d6d04aa158de2,
+                ),
+                y: coordinate_constant(
+                    0x2dad22022121d689f57fb38ca21349cefb5d240b07ceb4be26ea429b6dc9d9e0,
+                ),
+            },
+            // q_lookup
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+                y: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+            },
+            // t1
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+                y: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+            },
+            // t2
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+                y: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+            },
+            // t3
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+                y: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+            },
+            // t4
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+                y: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+            },
+            // qm
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x024236bda126650fb5228cf424a0878775499e69e8bd2c39af33bd5fa0b4079a,
+                ),
+                y: coordinate_constant(
+                    0x233cda9292be02cfa2da9d0fc7b0eab0eb1a867b06854066589b967455259b32,
+                ),
+            },
+            // qr
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+                y: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+            },
+            // qo
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x024236bda126650fb5228cf424a0878775499e69e8bd2c39af33bd5fa0b4079a,
+                ),
+                y: coordinate_constant(
+                    0x0d2773e04e739d5a1575a8a6b9d06dacac66e41661ec8a26e384f5a283576215,
+                ),
+            },
+            // qc
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+                y: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+            },
+            // ql
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x15155682b5f542d21caea8aa63a5356ac513dd40f534ef35e06d717dc054012d,
+                ),
+                y: coordinate_constant(
+                    0x1a7ea579053b7d9b94be8f3a705e3a57986014488990c3805f1600329fb36922,
+                ),
+            },
+            // q4
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+                y: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+            },
+            // q_arith
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x231f31b6d53410ad7d4a3c713c842c8563b2a26a4f69defd8ef85bade0a2bf38,
+                ),
+                y: coordinate_constant(
+                    0x0015443d87bea918ac40d37eb46c12bf98d73ed1d6e5267289bb4f5ad863d8b7,
+                ),
+            },
+            // q_range
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+                y: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+            },
+            // q_elliptic
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+                y: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+            },
+            // q_memory
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+                y: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+            },
+            // q_nnf
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+                y: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+            },
+            // q_poseidon_external
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+                y: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+            },
+            // q_poseidon_internal
+            EncodedG1 {
+                x: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+                y: coordinate_constant(
+                    0x0000000000000000000000000000000000000000000000000000000000000000,
+                ),
+            },
+        ],
+    }
+}

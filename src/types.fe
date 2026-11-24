@@ -1,0 +1,56 @@
+use ingot::field::{Fq, Fr}
+
+/// An unreduced 256-bit digest. Its original bytes matter to the transcript.
+pub struct Digest256 { word: u256 }
+
+impl Copy for Digest256 {}
+
+impl Digest256 {
+    pub fn from_word(_ word: u256) -> Self {
+        Self { word }
+    }
+
+    pub fn to_word(self) -> u256 {
+        self.word
+    }
+
+    /// Explicit reduction, only at the protocol's challenge-derivation boundary.
+    pub fn reduce_to_fr(self) -> Fr {
+        Fr::from_hash_word(self.word)
+    }
+}
+
+/// Both coordinates are canonical, but this point is NOT yet curve-checked.
+/// (0, 0) is the EVM identity encoding and must not be rejected globally.
+pub struct EncodedG1 { pub x: Fq, pub y: Fq }
+
+impl Copy for EncodedG1 {}
+
+/// Extension-field encoding imag * i + real, where i² = -1.
+/// EIP-197 serializes imag BEFORE real.
+pub struct Fq2 { pub imag: Fq, pub real: Fq }
+
+impl Copy for Fq2 {}
+
+/// Canonical components only. The pairing precompile checks curve and subgroup
+/// membership; this encoding must not be treated as an already validated G2.
+pub struct EncodedG2 { pub x: Fq2, pub y: Fq2 }
+
+impl Copy for EncodedG2 {}
+
+/// One term of the Shplemini multi-scalar multiplication.
+/// Keeping each point beside its scalar prevents parallel-array misalignment.
+pub struct MsmTerm { pub point: EncodedG1, pub scalar: Fr }
+
+impl Copy for MsmTerm {}
+
+impl EncodedG1 {
+    pub fn identity() -> Self {
+        let zero = ingot::field::coordinate_constant(0)
+        Self { x: zero, y: zero }
+    }
+
+    pub fn generator() -> Self {
+        Self { x: ingot::field::coordinate_constant(1), y: ingot::field::coordinate_constant(2) }
+    }
+}

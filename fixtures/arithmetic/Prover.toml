@@ -1,0 +1,4 @@
+# Public test data only. These are deliberately non-secret fixture inputs.
+a = "3"
+b = "4"
+result = "12"

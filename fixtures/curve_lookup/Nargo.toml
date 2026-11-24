@@ -1,0 +1,5 @@
+[package]
+name = "curve_lookup"
+type = "bin"
+authors = [""]
+[dependencies]

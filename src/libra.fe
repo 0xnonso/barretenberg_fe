@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pinned BaseZKHonkVerifier.checkEvalsConsistency (small subgroup IPA).
+use ingot::field::{Fr, Fraction, inverse, scalar_constant}
+use ingot::verification_key::MAX_LOG_N
+use std::evm::{Call, Ctx, revert_error}
+
+#[inline(never)]
+pub fn check_consistency(
+    _ evaluations: [Fr; 4],
+    _ r: Fr,
+    _ challenges: ref [Fr; MAX_LOG_N],
+    _ log_n: usize,
+    _ libra_evaluation: Fr,
+) -> bool
+uses (call: Call, ctx: Ctx)
+{
+    ingot::verification_key::require_supported_log_n(log_n)
+    // r^256 by eight squarings: the same value as the reference pow(256).
+    var power = r
+    for _ in 0 .. 8 {
+        power = power * power
+    }
+    let vanishing = power - Fr::one()
+    if vanishing == Fr::zero() {
+        revert_error(ingot::errors::GeminiChallengeInSubgroup {})
+    }
+    let generator = scalar_constant(
+        0x07b0c561a6148404f086204a9f36ffb0617942546750f230c893619174a57a76,
+    )
+    let generator_inverse = scalar_constant(
+        0x204bd3277422fad364751ad938e2b5e6a54cf8c68712848a692c553d0329f5d6,
+    )
+    // Only 1 + 9*log_n Lagrange coefficients are nonzero. The vanishing check
+    // guarantees every subgroup denominator is nonzero, so the interior sum is
+    // one fraction and a single inversion yields all three reciprocals.
+    let first_denominator = r - Fr::one()
+    let last_denominator = generator * r - Fr::one()
+    var interior = Fraction::from(Fr::zero())
+    var root_power = generator_inverse
+    for round in 0 .. log_n {
+        var coefficient = Fr::one()
+        for _ in 0 .. 9 {
+            interior = interior.add_quotient(coefficient, root_power * r - Fr::one())
+            coefficient = coefficient * challenges[round]
+            root_power = root_power * generator_inverse
+        }
+    }
+    let shared = inverse(
+        first_denominator * last_denominator * interior.denominator(),
+    )
+    // (r^256 - 1) / 256, with 1/256 precomputed.
+    let numerator = vanishing *
+        scalar_constant(
+            0x3033ea246e506e898e97f570caffd704cb0bb460313fb720b29e139e5c100001,
+        )
+    let first = shared * last_denominator * interior.denominator() * numerator
+    let last = shared * first_denominator * interior.denominator() * numerator
+    let challenge_evaluation = first
+        + shared * first_denominator * last_denominator * interior.numerator() * numerator
+    let difference = first * evaluations[2]
+        + (r - generator_inverse) *
+            (evaluations[1] - evaluations[2] - evaluations[0] * challenge_evaluation)
+        + last * (evaluations[2] - libra_evaluation) -
+        vanishing * evaluations[3]
+    difference == Fr::zero()
+}

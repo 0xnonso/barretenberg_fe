@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: Apache-2.0
+// Port of Aztec Labs (2024) pinned Relations.sol: accumulateDeltaRangeRelation.
+use ingot::entities::{Q_RANGE, W_4, W_L, W_L_SHIFT, W_O, W_R}
+use ingot::field::{Fr, scalar_constant}
+
+#[inline(never)]
+pub fn accumulate(_ p: [Fr; 41], _ evals: mut [Fr; 31], _ domain_sep: Fr) {
+    let minus_one = Fr::zero() - Fr::one()
+    let minus_two = Fr::zero() - scalar_constant(2)
+    let minus_three = Fr::zero() - scalar_constant(3)
+    let delta_1 = p[W_R] - p[W_L]
+    let delta_2 = p[W_O] - p[W_R]
+    let delta_3 = p[W_4] - p[W_O]
+    let delta_4 = p[W_L_SHIFT] - p[W_4]
+    {
+        var acc = delta_1
+        acc = acc * (delta_1 + minus_one)
+        acc = acc * (delta_1 + minus_two)
+        acc = acc * (delta_1 + minus_three)
+        acc = acc * p[Q_RANGE]
+        acc = acc * domain_sep
+        evals[8] = acc
+    }
+    {
+        var acc = delta_2
+        acc = acc * (delta_2 + minus_one)
+        acc = acc * (delta_2 + minus_two)
+        acc = acc * (delta_2 + minus_three)
+        acc = acc * p[Q_RANGE]
+        acc = acc * domain_sep
+        evals[9] = acc
+    }
+    {
+        var acc = delta_3
+        acc = acc * (delta_3 + minus_one)
+        acc = acc * (delta_3 + minus_two)
+        acc = acc * (delta_3 + minus_three)
+        acc = acc * p[Q_RANGE]
+        acc = acc * domain_sep
+        evals[10] = acc
+    }
+    {
+        var acc = delta_4
+        acc = acc * (delta_4 + minus_one)
+        acc = acc * (delta_4 + minus_two)
+        acc = acc * (delta_4 + minus_three)
+        acc = acc * p[Q_RANGE]
+        acc = acc * domain_sep
+        evals[11] = acc
+    }
+}

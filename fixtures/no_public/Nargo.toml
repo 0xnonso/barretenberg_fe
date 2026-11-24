@@ -1,0 +1,5 @@
+[package]
+name = "no_public"
+type = "bin"
+authors = [""]
+[dependencies]

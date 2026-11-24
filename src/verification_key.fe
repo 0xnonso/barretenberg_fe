@@ -1,0 +1,44 @@
+// Circuit-independent key layout. Values come from the generated `circuit`
+// module and are stored as immutable contract data by the constructor, so
+// they never specialize the compiled verifier (Solidity: `immutable $LOG_N`).
+use ingot::types::EncodedG1
+
+/// Largest supported circuit, matching Solidity's CONST_PROOF_SIZE_LOG_N.
+/// Arrays indexed by sumcheck round use this fixed capacity; `log_n` bounds loops.
+pub const MAX_LOG_N: usize = 25
+/// Shplemini MSM: shplonk_q, 37 unshifted, log_n - 1 folds, 3 Libra, G1, KZG.
+pub const MSM_CAPACITY: usize = 42 + MAX_LOG_N
+/// Eight recursive-accumulator limbs follow the application inputs.
+pub const PAIRING_POINTS_SIZE: usize = 8
+
+/// Commitments follow HonkTypes.WIRE order; the masking polynomial is not a VK entry.
+pub struct VerificationKey {
+    pub log_n: usize,
+    pub application_inputs: usize,
+    pub hash: u256,
+    pub commitments: [EncodedG1; 28],
+}
+
+impl Copy for VerificationKey {}
+
+pub(ingot) fn require_supported_log_n(_ log_n: usize) {
+    if log_n < 2 || log_n > MAX_LOG_N {
+        std::evm::revert_error(ingot::errors::UnsupportedLogN { logN: log_n as u256 })
+    }
+}
+
+impl VerificationKey {
+    /// Constructor-time validation; the generator enforces the same bounds.
+    pub fn is_supported(self) -> bool {
+        self.log_n >= 2
+            && self.log_n <= MAX_LOG_N
+            && PAIRING_POINTS_SIZE < 1 << self.log_n
+            && self.application_inputs < (1 << self.log_n) - PAIRING_POINTS_SIZE
+    }
+
+    /// Shplemini terms in use; the rest of MSM_CAPACITY stays empty.
+    pub fn msm_size(self) -> usize {
+        require_supported_log_n(self.log_n)
+        42 + self.log_n
+    }
+}

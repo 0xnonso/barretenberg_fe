@@ -1,0 +1,63 @@
+// SPDX-License-Identifier: Apache-2.0
+// Port of Aztec Labs (2024) pinned Relations.sol: accumulatePermutationRelation.
+use ingot::entities::{
+    ID_1,
+    ID_2,
+    ID_3,
+    ID_4,
+    LAGRANGE_FIRST,
+    LAGRANGE_LAST,
+    SIGMA_1,
+    SIGMA_2,
+    SIGMA_3,
+    SIGMA_4,
+    W_4,
+    W_L,
+    W_O,
+    W_R,
+    Z_PERM,
+    Z_PERM_SHIFT,
+}
+use ingot::field::Fr
+use ingot::proof::RelationParameters
+
+#[inline(never)]
+pub fn accumulate(
+    _ p: [Fr; 41],
+    _ rp: RelationParameters,
+    _ evals: mut [Fr; 31],
+    _ domain_sep: Fr,
+) {
+    var grand_product_numerator = Fr::zero()
+    var grand_product_denominator = Fr::zero()
+    {
+        var num = p[W_L] + p[ID_1] * rp.beta + rp.gamma
+        num = num * (p[W_R] + p[ID_2] * rp.beta + rp.gamma)
+        num = num * (p[W_O] + p[ID_3] * rp.beta + rp.gamma)
+        num = num * (p[W_4] + p[ID_4] * rp.beta + rp.gamma)
+        grand_product_numerator = num
+    }
+    {
+        var den = p[W_L] + p[SIGMA_1] * rp.beta + rp.gamma
+        den = den * (p[W_R] + p[SIGMA_2] * rp.beta + rp.gamma)
+        den = den * (p[W_O] + p[SIGMA_3] * rp.beta + rp.gamma)
+        den = den * (p[W_4] + p[SIGMA_4] * rp.beta + rp.gamma)
+        grand_product_denominator = den
+    }
+    {
+        var acc = (p[Z_PERM] + p[LAGRANGE_FIRST]) * grand_product_numerator
+        acc = acc -
+            ((p[Z_PERM_SHIFT] + (p[LAGRANGE_LAST] * rp.public_inputs_delta)) *
+                grand_product_denominator)
+        acc = acc * domain_sep
+        evals[0] = acc
+    }
+    {
+        var acc = (p[LAGRANGE_LAST] * p[Z_PERM_SHIFT]) * domain_sep
+        evals[1] = acc
+    }
+    {
+        var acc = (p[LAGRANGE_FIRST] * p[Z_PERM]) * domain_sep
+        evals[2] = acc
+    }
+}

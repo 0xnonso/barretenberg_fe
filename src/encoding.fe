@@ -1,0 +1,212 @@
+use core::result::Result
+use ingot::errors::{
+    ValueGeLimbMax,
+    ValueGeFieldOrder,
+    ValueGeGroupOrder,
+    ProofLengthWrong,
+    ProofLengthWrongWithLogN,
+}
+use ingot::field::{Fq, Fr}
+use ingot::proof::ProofBuffer
+use ingot::types::EncodedG1
+use std::abi::Bytes
+use std::evm::revert_error
+
+pub enum ProofReadError {
+    UnexpectedEnd,
+    NonCanonicalScalar,
+    NonCanonicalCoordinate,
+    TrailingBytes,
+}
+
+impl Copy for ProofReadError {}
+
+/// Owns the payload. Private cursor is always <= bytes.len().
+/// Every failed operation leaves the cursor unchanged, including a whole G1 read.
+pub struct ProofReader { bytes: Bytes, cursor: u256 }
+
+impl ProofReader {
+    pub fn new(_ bytes: own Bytes) -> Self {
+        Self { bytes, cursor: 0 }
+    }
+
+    pub fn position(self) -> u256 {
+        self.cursor
+    }
+
+    pub fn remaining(self) -> u256 {
+        self.bytes.len() as u256 - self.cursor
+    }
+
+    pub fn skip(mut self, _ width: u256) -> Result<ProofReadError, ()> {
+        if width > self.remaining() {
+            return Result::Err(ProofReadError::UnexpectedEnd)
+        }
+        self.cursor += width
+        Result::Ok(())
+    }
+
+    /// Unrestricted big-endian word. No field reduction or range check.
+    pub fn read_word(mut self) -> Result<ProofReadError, u256> {
+        if self.remaining() < 32 {
+            return Result::Err(ProofReadError::UnexpectedEnd)
+        }
+        let word = self.word_here()
+        self.cursor += 32
+        Result::Ok(word)
+    }
+
+    pub fn read_fr(mut self) -> Result<ProofReadError, Fr> {
+        if self.remaining() < 32 {
+            return Result::Err(ProofReadError::UnexpectedEnd)
+        }
+        match Fr::from_word(self.word_here()) {
+            Result::Ok(value) => {
+                self.cursor += 32
+                Result::Ok(value)
+            },
+            Result::Err(_) => Result::Err(ProofReadError::NonCanonicalScalar),
+        }
+    }
+
+    pub fn read_fq(mut self) -> Result<ProofReadError, Fq> {
+        if self.remaining() < 32 {
+            return Result::Err(ProofReadError::UnexpectedEnd)
+        }
+        match Fq::from_word(self.word_here()) {
+            Result::Ok(value) => {
+                self.cursor += 32
+                Result::Ok(value)
+            },
+            Result::Err(_) => Result::Err(ProofReadError::NonCanonicalCoordinate),
+        }
+    }
+
+    /// Two canonical coordinates; curve membership is a later boundary.
+    /// In particular, the identity encoding (0,0) remains allowed.
+    pub fn read_g1(mut self) -> Result<ProofReadError, EncodedG1> {
+        if self.remaining() < 64 {
+            return Result::Err(ProofReadError::UnexpectedEnd)
+        }
+        let x = match Fq::from_word(self.word_here()) {
+            Result::Ok(value) => value,
+            Result::Err(_) => {
+                return Result::Err(ProofReadError::NonCanonicalCoordinate)
+            },
+        }
+        // The 64-byte check proves this offset fits usize and contains a full word.
+        let y_word = self.bytes.word_at((self.cursor + 32).downcast_unchecked())
+        let y = match Fq::from_word(y_word) {
+            Result::Ok(value) => value,
+            Result::Err(_) => {
+                return Result::Err(ProofReadError::NonCanonicalCoordinate)
+            },
+        }
+        self.cursor += 64
+        Result::Ok(EncodedG1 { x, y })
+    }
+
+    pub fn finish(self) -> Result<ProofReadError, ()> {
+        if self.remaining() == 0 {
+            Result::Ok(())
+        } else {
+            Result::Err(ProofReadError::TrailingBytes)
+        }
+    }
+
+    // Only called after checking at least 32 bytes remain. This also proves the
+    // u256 cursor fits usize. Bytes.word_at would otherwise zero-pad a short word.
+    fn word_here(self) -> u256 {
+        self.bytes.word_at(self.cursor.downcast_unchecked())
+    }
+}
+
+/// Bytes in an UltraKeccakZKFlavor proof for a circuit of 2^log_n rows.
+pub fn proof_bytes(_ log_n: usize) -> usize {
+    ingot::verification_key::require_supported_log_n(log_n)
+    32 * (82 + 12 * log_n)
+}
+
+/// Decode the entire payload for a circuit of 2^log_n rows. Invalid encodings
+/// revert, as in Solidity loadProof. This establishes representation, not validity.
+#[inline(never)]
+pub fn decode_proof(_ bytes: own Bytes, _ log_n: usize) -> ProofBuffer {
+    let expected = proof_bytes(log_n)
+    if bytes.len() != expected {
+        revert_error(
+            ProofLengthWrongWithLogN {
+                logN: log_n as u256,
+                actualLength: bytes.len() as u256,
+                expectedLength: expected as u256,
+            },
+        )
+    }
+    var reader = ProofReader::new(bytes)
+    var decoded = ProofBuffer::new()
+    let p = mut decoded.get()
+    p.log_n = log_n
+    for i in 0 .. 8 {
+        let word = match reader.read_word() {
+            Result::Ok(value) => value,
+            Result::Err(_) => revert_error(ProofLengthWrong {}),
+        }
+        let bits: u256 = if i % 2 == 0 { 136 } else { 120 }
+        if word >= 1 << bits {
+            revert_error(ValueGeLimbMax {})
+        }
+        p.accumulator[i] = ingot::field::scalar_constant(word)
+    }
+    p.gemini_masking_poly = point(mut reader)
+    p.w1 = point(mut reader)
+    p.w2 = point(mut reader)
+    p.w3 = point(mut reader)
+    p.lookup_read_counts = point(mut reader)
+    p.lookup_read_tags = point(mut reader)
+    p.w4 = point(mut reader)
+    p.lookup_inverses = point(mut reader)
+    p.z_perm = point(mut reader)
+    p.libra_commitments[0] = point(mut reader)
+    p.libra_sum = scalar(mut reader)
+    for i in 0 .. log_n {
+        for j in 0 .. 9 {
+            p.sumcheck_univariates[i][j] = scalar(mut reader)
+        }
+    }
+    for i in 0 .. 42 {
+        p.evaluations[i] = scalar(mut reader)
+    }
+    p.libra_evaluation = scalar(mut reader)
+    p.libra_commitments[1] = point(mut reader)
+    p.libra_commitments[2] = point(mut reader)
+    for i in 0 .. log_n - 1 {
+        p.gemini_fold_comms[i] = point(mut reader)
+    }
+    for i in 0 .. log_n {
+        p.gemini_a_evaluations[i] = scalar(mut reader)
+    }
+    for i in 0 .. 4 {
+        p.libra_poly_evals[i] = scalar(mut reader)
+    }
+    p.shplonk_q = point(mut reader)
+    p.kzg_quotient = point(mut reader)
+    if reader.finish().is_err() {
+        revert_error(ProofLengthWrong {})
+    }
+    decoded
+}
+
+fn scalar(_ reader: mut ProofReader) -> Fr {
+    match reader.read_fr() {
+        Result::Ok(value) => value,
+        Result::Err(ProofReadError::NonCanonicalScalar) => revert_error(ValueGeFieldOrder {}),
+        Result::Err(_) => revert_error(ProofLengthWrong {}),
+    }
+}
+
+fn point(_ reader: mut ProofReader) -> EncodedG1 {
+    match reader.read_g1() {
+        Result::Ok(value) => value,
+        Result::Err(ProofReadError::NonCanonicalCoordinate) => revert_error(ValueGeGroupOrder {}),
+        Result::Err(_) => revert_error(ProofLengthWrong {}),
+    }
+}

@@ -1,0 +1,5 @@
+{
+  "files.associations": { "*.fe": "fe" },
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true
+}

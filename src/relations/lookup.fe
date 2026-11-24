@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: Apache-2.0
+// Port of Aztec Labs (2024) pinned Relations.sol: accumulateLogDerivativeLookupRelation.
+use ingot::entities::{
+    LOOKUP_INVERSES,
+    LOOKUP_READ_COUNTS,
+    LOOKUP_READ_TAGS,
+    Q_C,
+    Q_LOOKUP,
+    Q_M,
+    Q_O,
+    Q_R,
+    TABLE_1,
+    TABLE_2,
+    TABLE_3,
+    TABLE_4,
+    W_L,
+    W_L_SHIFT,
+    W_O,
+    W_O_SHIFT,
+    W_R,
+    W_R_SHIFT,
+}
+use ingot::field::Fr
+use ingot::proof::RelationParameters
+
+#[inline(never)]
+pub fn accumulate(
+    _ p: [Fr; 41],
+    _ rp: RelationParameters,
+    _ evals: mut [Fr; 31],
+    _ domain_sep: Fr,
+) {
+    var table_term = Fr::zero()
+    var lookup_term = Fr::zero()
+    {
+        var beta_sqr = rp.beta * rp.beta
+        table_term = p[TABLE_1]
+            + rp.gamma
+            + (p[TABLE_2] * rp.beta)
+            + (p[TABLE_3] * beta_sqr)
+            + (p[TABLE_4] * beta_sqr * rp.beta)
+    }
+    {
+        var beta_sqr = rp.beta * rp.beta
+        let derived_entry_1 = p[W_L] + rp.gamma + (p[Q_R] * p[W_L_SHIFT])
+        let derived_entry_2 = p[W_R] + p[Q_M] * p[W_R_SHIFT]
+        let derived_entry_3 = p[W_O] + p[Q_C] * p[W_O_SHIFT]
+        lookup_term = derived_entry_1
+            + (derived_entry_2 * rp.beta)
+            + (derived_entry_3 * beta_sqr)
+            + (p[Q_O] * beta_sqr * rp.beta)
+    }
+    let lookup_inverse = p[LOOKUP_INVERSES] * table_term
+    let table_inverse = p[LOOKUP_INVERSES] * lookup_term
+    let inverse_exists_xor = p[LOOKUP_READ_TAGS] + p[Q_LOOKUP] - (p[LOOKUP_READ_TAGS] * p[Q_LOOKUP])
+    var accumulatorNone = lookup_term * table_term * p[LOOKUP_INVERSES] - inverse_exists_xor
+    accumulatorNone = accumulatorNone * domain_sep
+    let accumulatorOne = p[Q_LOOKUP] * lookup_inverse - p[LOOKUP_READ_COUNTS] * table_inverse
+    let read_tag = p[LOOKUP_READ_TAGS]
+    let read_tag_boolean_relation = read_tag * read_tag - read_tag
+    evals[3] = accumulatorNone
+    evals[4] = accumulatorOne
+    evals[5] = read_tag_boolean_relation * domain_sep
+}

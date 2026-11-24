@@ -1,0 +1,117 @@
+use core::ptr::MemArray
+use core::result::Result
+use ingot::field::{FieldArithmeticError, Fr, Fraction, scalar_constant}
+use ingot::proof::{ParsedProof, Transcript}
+use ingot::relations::{RELATION_INPUT_WORDS, RelationCalls}
+use std::abi::Bytes
+use std::evm::{Address, Call, Ctx}
+
+/// Evaluate the degree-at-most-eight round polynomial at u with the
+/// reference's barycentric formula, as one fraction: no inversion is needed.
+/// Match the reference: u in 0..8 is an inversion-of-zero error.
+pub fn interpolate_fraction(_ values: [Fr; 9], _ u: Fr) -> Result<FieldArithmeticError, Fraction> {
+    let denominators = [
+        scalar_constant(40320),
+        -scalar_constant(5040),
+        scalar_constant(1440),
+        -scalar_constant(720),
+        scalar_constant(576),
+        -scalar_constant(720),
+        scalar_constant(1440),
+        -scalar_constant(5040),
+        scalar_constant(40320),
+    ]
+    var numerator = Fr::one()
+    var sum = Fraction::from(Fr::zero())
+    for i in 0 .. 9 {
+        let difference = u - scalar_constant(i as u256)
+        numerator = numerator * difference
+        sum = sum.add_quotient(values[i], denominators[i] * difference)
+    }
+    // Zero exactly when some u - i is zero: the reference's failed inversion.
+    if sum.denominator() == Fr::zero() {
+        return Result::Err(FieldArithmeticError::ZeroInverse)
+    }
+    Result::Ok(sum.scale(numerator))
+}
+
+pub fn interpolate(_ values: [Fr; 9], _ u: Fr) -> Result<FieldArithmeticError, Fr>
+uses (call: Call, ctx: Ctx)
+{
+    match interpolate_fraction(values, u) {
+        Result::Ok(value) => value.evaluate(),
+        Result::Err(error) => Result::Err(error),
+    }
+}
+
+pub enum SumcheckError {
+    RoundMismatch,
+    Arithmetic(FieldArithmeticError),
+}
+
+/// Verify each round's g(0)+g(1)=target and return the final target and gate
+/// weight. Targets stay fractions with nonzero denominators, so every round is
+/// checked by cross-multiplication instead of nine inversions.
+pub fn check_rounds(_ p: ParsedProof, _ t: Transcript) -> Result<SumcheckError, (Fraction, Fr)> {
+    ingot::verification_key::require_supported_log_n(p.log_n)
+    var target = Fraction::from(t.libra_challenge * p.libra_sum)
+    var gate_weight = Fr::one()
+    for i in 0 .. p.log_n {
+        let round = ref p.sumcheck_univariates[i]
+        if !target.equals(round[0] + round[1]) {
+            return Result::Err(SumcheckError::RoundMismatch)
+        }
+        target = match interpolate_fraction(round, t.sumcheck_challenges[i]) {
+            Result::Ok(value) => value,
+            Result::Err(error) => {
+                return Result::Err(SumcheckError::Arithmetic(error))
+            },
+        }
+        gate_weight = gate_weight *
+            (Fr::one() + t.sumcheck_challenges[i] * (t.gate_challenges[i] - Fr::one()))
+    }
+    Result::Ok((target, gate_weight))
+}
+
+/// Complete sumcheck relation check. The batched relation sum comes from the
+/// verifier's RelationsLib contract. Opening authentication is a later stage.
+pub fn verify_sumcheck(_ p: ParsedProof, _ t: Transcript, _ relations: Address) -> bool
+uses (call: Call)
+{
+    let (target, gate_weight) = match check_rounds(p, t) {
+        Result::Ok(values) => values,
+        Result::Err(SumcheckError::Arithmetic(error)) => ingot::errors::arithmetic(error),
+        Result::Err(SumcheckError::RoundMismatch) => {
+            return false
+        },
+    }
+    // RelationsLib payload; relation inputs skip the masking evaluation at index 0.
+    var words = MemArray<u256>::new_zeroed(RELATION_INPUT_WORDS)
+    for i in 0 .. 41 {
+        words[i] = p.evaluations[i + 1].to_word()
+    }
+    let rp = t.relation_parameters
+    words[41] = rp.eta.to_word()
+    words[42] = rp.rom_logup_gamma.to_word()
+    words[43] = rp.beta.to_word()
+    words[44] = rp.gamma.to_word()
+    words[45] = rp.public_inputs_delta.to_word()
+    for i in 0 .. 30 {
+        words[46 + i] = t.alphas[i].to_word()
+    }
+    words[76] = gate_weight.to_word()
+    let relation_sum = scalar_constant(
+        relations
+            .static(
+                RelationCalls::Accumulate { inputs: Bytes::from_payload(source: words.span()) },
+            ),
+    )
+    var disabled_rows = Fr::one()
+    for i in 2 .. p.log_n {
+        disabled_rows = disabled_rows * (Fr::one() - t.sumcheck_challenges[i])
+    }
+    target
+        .equals(
+            relation_sum * (Fr::one() - disabled_rows) + p.libra_evaluation * t.libra_challenge,
+        )
+}

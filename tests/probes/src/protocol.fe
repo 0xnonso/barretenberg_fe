@@ -1,0 +1,105 @@
+use barretenberg_fe::circuit::verification_key
+use barretenberg_fe::transcript::hash_words
+use ingot::support::decode
+use std::abi::Bytes
+
+msg ProtocolCalls {
+    #[selector = sol("hash(uint256[3])")]
+    Hash { words: [u256; 3] } -> (u256, u256, u256, u256),
+    #[selector = sol("decode(bytes)")]
+    Decode { data: Bytes } -> [u256; 142],
+    #[selector = sol("key()")]
+    Key {} -> [u256; 60],
+}
+
+pub contract ProtocolProbe {
+    recv ProtocolCalls {
+        Hash { words } -> (u256, u256, u256, u256) {
+            let digest = hash_words(words)
+            (
+                hash_words<0>([]).to_word(),
+                hash_words([words[0]]).to_word(),
+                digest.to_word(),
+                digest.reduce_to_fr().to_word(),
+            )
+        }
+
+        Decode { data } -> [u256; 142] {
+            let decoded = decode(data)
+            let p = ref decoded.get()
+            var words = [0; 142]
+            var at: usize = 0
+            for value in p.accumulator {
+                words[at] = value.to_word()
+                at += 1
+            }
+            // Semantic order deliberately differs from the wire serialization.
+            let commitments = [
+                p.w1,
+                p.w2,
+                p.w3,
+                p.w4,
+                p.z_perm,
+                p.lookup_read_counts,
+                p.lookup_read_tags,
+                p.lookup_inverses,
+                p.gemini_masking_poly,
+                p.libra_commitments[0],
+                p.libra_commitments[1],
+                p.libra_commitments[2],
+            ]
+            for value in commitments {
+                words[at] = value.x.to_word()
+                words[at + 1] = value.y.to_word()
+                at += 2
+            }
+            words[at] = p.libra_sum.to_word()
+            at += 1
+            for i in 0 .. p.log_n {
+                for value in p.sumcheck_univariates[i] {
+                    words[at] = value.to_word()
+                    at += 1
+                }
+            }
+            for value in p.evaluations {
+                words[at] = value.to_word()
+                at += 1
+            }
+            words[at] = p.libra_evaluation.to_word()
+            at += 1
+            for i in 0 .. p.log_n - 1 {
+                words[at] = p.gemini_fold_comms[i].x.to_word()
+                words[at + 1] = p.gemini_fold_comms[i].y.to_word()
+                at += 2
+            }
+            for i in 0 .. p.log_n {
+                words[at] = p.gemini_a_evaluations[i].to_word()
+                at += 1
+            }
+            for value in p.libra_poly_evals {
+                words[at] = value.to_word()
+                at += 1
+            }
+            words[at] = p.shplonk_q.x.to_word()
+            words[at + 1] = p.shplonk_q.y.to_word()
+            words[at + 2] = p.kzg_quotient.x.to_word()
+            words[at + 3] = p.kzg_quotient.y.to_word()
+            assert!(at + 4 == 142)
+            words
+        }
+
+        Key {} -> [u256; 60] {
+            let vk = verification_key()
+            var words = [0; 60]
+            words[0] = 1 << vk.log_n as u256
+            words[1] = vk.log_n as u256
+            words[2] = (vk.application_inputs + 8) as u256
+            words[3] = vk.hash
+            for i in 0 .. 28 {
+                words[4 + 2 * i] = vk.commitments[i].x.to_word()
+                words[5 + 2 * i] = vk.commitments[i].y.to_word()
+            }
+            words
+        }
+    }
+}

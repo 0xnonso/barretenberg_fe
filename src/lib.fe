@@ -1,0 +1,34 @@
+use ingot::relations::RelationsLib
+use ingot::verification_key::VerificationKey
+use ingot::verifier::verify
+use std::abi::{Bytes, Bytes32, DynArray}
+use std::evm::units::Wei
+use std::evm::{Address, Call, Create, Ctx}
+
+msg VerifierCalls {
+    #[selector = sol("verify(bytes,bytes32[])")]
+    Verify { proof: Bytes, public_inputs: DynArray<Bytes32> } -> bool,
+}
+
+/// One runtime for every circuit: the key is immutable contract data written by
+/// the constructor (read back with CODECOPY), never code-specializing constants.
+/// The constructor also deploys RelationsLib, keeping each contract small.
+pub contract UltraHonkVerifier uses (call: Call, ctx: Ctx) {
+    key: VerificationKey,
+    relations: Address,
+
+    init()
+    uses (mut key, mut relations, create: mut Create)
+    {
+        let circuit = ingot::circuit::verification_key()
+        assert!(circuit.is_supported())
+        key = circuit
+        relations = create.create<RelationsLib>(value: Wei::zero(), args: ())
+    }
+
+    recv VerifierCalls {
+        Verify { proof, public_inputs } -> bool uses (key, relations, call, ctx) {
+            verify(key, relations, proof, public_inputs)
+        }
+    }
+}

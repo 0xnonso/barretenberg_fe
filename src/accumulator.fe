@@ -1,0 +1,108 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pinned utils.sol recursive accumulator reconstruction and aggregation.
+use core::result::Result
+use ingot::curve::{CurveError, G1}
+use ingot::field::{Fq, Fr}
+use ingot::transcript::hash_words
+use ingot::types::EncodedG1
+use std::evm::{Call, Ctx, revert_empty, revert_error}
+
+pub fn decode_points(_ limbs: [Fr; 8]) -> (G1, G1) {
+    let (lhs, rhs) = encoded_points(limbs)
+    (checked_point(lhs), checked_point(rhs))
+}
+
+fn encoded_points(_ limbs: [Fr; 8]) -> (EncodedG1, EncodedG1) {
+    for i in 0 .. 8 {
+        let bits: u256 = if i % 2 == 0 { 136 } else { 120 }
+        if limbs[i].to_word() >= 1 << bits {
+            revert_error(ingot::errors::ValueGeLimbMax {})
+        }
+    }
+    (point(limbs[0], limbs[1], limbs[2], limbs[3]), point(limbs[4], limbs[5], limbs[6], limbs[7]))
+}
+
+pub fn aggregate(_ lhs: G1, _ rhs: G1, _ limbs: [Fr; 8]) -> Result<CurveError, (G1, G1)>
+uses (call: Call, ctx: Ctx)
+{
+    var is_default = true
+    for limb in limbs {
+        if limb != Fr::zero() {
+            is_default = false
+        }
+    }
+    if is_default {
+        return Result::Ok((lhs, rhs))
+    }
+    let (encoded_lhs, encoded_rhs) = encoded_points(limbs)
+    // Solidity checks all coordinates, then both identities, before curve calls.
+    if (encoded_lhs.x.to_word() | encoded_lhs.y.to_word()) == 0
+        || (encoded_rhs.x.to_word() | encoded_rhs.y.to_word()) == 0 {
+        revert_error(ingot::errors::PointAtInfinity {})
+    }
+    let other_lhs = checked_point(encoded_lhs)
+    let other_rhs = checked_point(encoded_rhs)
+    let separator = recursion_separator(other_lhs, other_rhs, lhs, rhs)
+    let lhs = match combine(lhs, other_lhs, separator) {
+        Result::Ok(value) => value,
+        Result::Err(error) => {
+            return Result::Err(error)
+        },
+    }
+    let rhs = match combine(rhs, other_rhs, separator) {
+        Result::Ok(value) => value,
+        Result::Err(error) => {
+            return Result::Err(error)
+        },
+    }
+    Result::Ok((lhs, rhs))
+}
+
+pub fn recursion_separator(_ other_lhs: G1, _ other_rhs: G1, _ lhs: G1, _ rhs: G1) -> Fr {
+    let a = other_lhs.to_encoded()
+    let b = other_rhs.to_encoded()
+    let c = lhs.to_encoded()
+    let d = rhs.to_encoded()
+    hash_words(
+        [
+            a.x.to_word(),
+            a.y.to_word(),
+            b.x.to_word(),
+            b.y.to_word(),
+            c.x.to_word(),
+            c.y.to_word(),
+            d.x.to_word(),
+            d.y.to_word(),
+        ],
+    )
+        .reduce_to_fr()
+}
+
+fn combine(_ base: G1, _ other: G1, _ separator: Fr) -> Result<CurveError, G1>
+uses (call: Call, ctx: Ctx)
+{
+    match base.mul(separator) {
+        Result::Ok(scaled) => scaled.add(other),
+        Result::Err(error) => Result::Err(error),
+    }
+}
+
+fn point(_ x_lo: Fr, _ x_hi: Fr, _ y_lo: Fr, _ y_hi: Fr) -> EncodedG1 {
+    let x = coordinate(x_lo.to_word() | (x_hi.to_word() << 136))
+    let y = coordinate(y_lo.to_word() | (y_hi.to_word() << 136))
+    EncodedG1 { x, y }
+}
+
+fn checked_point(_ encoded: EncodedG1) -> G1 {
+    match G1::from_encoded(encoded) {
+        Result::Ok(value) => value,
+        Result::Err(_) => revert_empty(),
+    }
+}
+
+fn coordinate(_ word: u256) -> Fq {
+    match Fq::from_word(word) {
+        Result::Ok(value) => value,
+        Result::Err(_) => revert_error(ingot::errors::ValueGeGroupOrder {}),
+    }
+}

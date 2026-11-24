@@ -1,0 +1,6 @@
+// expect: type mismatch
+use ingot::curve::PairingTerm
+use ingot::types::{EncodedG1, EncodedG2}
+fn misuse(_ g1: EncodedG1, _ g2: EncodedG2) -> PairingTerm {
+    PairingTerm { g1, g2 }
+}

@@ -1,0 +1,87 @@
+use barretenberg_fe::accumulator::{aggregate, decode_points, recursion_separator}
+use barretenberg_fe::curve::{G1, msm}
+use barretenberg_fe::field::{Fq, Fr}
+use barretenberg_fe::types::{EncodedG1, MsmTerm}
+use barretenberg_fe::verifier::final_pairing
+use core::result::Result
+use ingot::support::scalar
+use std::evm::{Call, Ctx, revert_empty}
+
+msg AccumulatorCalls {
+    #[selector = sol("combine(uint256[4],uint256[8])")]
+    Combine { base: [u256; 4], limbs: [u256; 8] } -> [u256; 5],
+    #[selector = sol("msm(uint256[141])")]
+    Msm { words: [u256; 141] } -> (u256, u256),
+    #[selector = sol("pair(uint256[4])")]
+    Pair { points: [u256; 4] } -> bool,
+}
+
+pub contract AccumulatorProbe uses (call: Call, ctx: Ctx) {
+    recv AccumulatorCalls {
+        Combine { base, limbs } -> [u256; 5] uses (call, ctx) {
+            let lhs = checked_point(base[0], base[1])
+            let rhs = checked_point(base[2], base[3])
+            var encoded = [Fr::zero(); 8]
+            for i in 0 .. 8 {
+                encoded[i] = scalar(limbs[i])
+            }
+            match aggregate(lhs, rhs, encoded) {
+                Result::Ok((a, b)) => {
+                    let (other_lhs, other_rhs) = decode_points(encoded)
+                    let separator = recursion_separator(other_lhs, other_rhs, lhs, rhs)
+                    let a = a.to_encoded()
+                    let b = b.to_encoded()
+                    [
+                        a.x.to_word(),
+                        a.y.to_word(),
+                        b.x.to_word(),
+                        b.y.to_word(),
+                        separator.to_word(),
+                    ]
+                },
+                Result::Err(_) => revert_empty(),
+            }
+        }
+        Msm { words } -> (u256, u256) uses (call, ctx) {
+            var terms = [MsmTerm { point: EncodedG1::identity(), scalar: Fr::zero() }; 47]
+            for i in 0 .. 47 {
+                terms[i] = MsmTerm {
+                    point: EncodedG1 {
+                        x: coordinate(words[3 * i]),
+                        y: coordinate(words[3 * i + 1]),
+                    },
+                    scalar: scalar(words[3 * i + 2]),
+                }
+            }
+            match msm(terms, 47) {
+                Result::Ok(value) => {
+                    let point = value.to_encoded()
+                    (point.x.to_word(), point.y.to_word())
+                },
+                Result::Err(_) => revert_empty(),
+            }
+        }
+        Pair { points } -> bool uses (call, ctx) {
+            match final_pairing(
+                checked_point(points[0], points[1]),
+                checked_point(points[2], points[3]),
+            ) {
+                Result::Ok(value) => value,
+                Result::Err(_) => revert_empty(),
+            }
+        }
+    }
+}
+
+fn coordinate(_ word: u256) -> Fq {
+    match Fq::from_word(word) {
+        Result::Ok(value) => value,
+        Result::Err(_) => revert_empty(),
+    }
+}
+fn checked_point(_ x: u256, _ y: u256) -> G1 {
+    match G1::from_encoded(EncodedG1 { x: coordinate(x), y: coordinate(y) }) {
+        Result::Ok(value) => value,
+        Result::Err(_) => revert_empty(),
+    }
+}

@@ -1,0 +1,6 @@
+// expect: type mismatch
+use ingot::curve::G1
+use ingot::types::EncodedG1
+fn misuse(_ point: EncodedG1) -> G1 {
+    point
+}

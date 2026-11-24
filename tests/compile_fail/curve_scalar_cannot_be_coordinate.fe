@@ -1,0 +1,7 @@
+// expect: type mismatch
+use ingot::curve::G1
+use ingot::field::Fq
+use std::evm::{Call, Ctx}
+fn misuse(_ a: G1, _ b: Fq) uses (call: Call, ctx: Ctx) {
+    let result = a.mul(b)
+}

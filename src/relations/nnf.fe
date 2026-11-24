@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: Apache-2.0
+// Port of Aztec Labs (2024) pinned Relations.sol: accumulateNnfRelation.
+use ingot::entities::{
+    Q_4,
+    Q_M,
+    Q_NNF,
+    Q_O,
+    Q_R,
+    W_4,
+    W_4_SHIFT,
+    W_L,
+    W_L_SHIFT,
+    W_O,
+    W_O_SHIFT,
+    W_R,
+    W_R_SHIFT,
+}
+use ingot::field::{Fr, scalar_constant}
+
+#[inline(never)]
+pub fn accumulate(_ p: [Fr; 41], _ evals: mut [Fr; 31], _ domain_sep: Fr) {
+    var limb_subproduct = p[W_L] * p[W_R_SHIFT] + p[W_L_SHIFT] * p[W_R]
+    var non_native_field_gate_2 = (p[W_L] * p[W_4] + p[W_R] * p[W_O] - p[W_O_SHIFT])
+    non_native_field_gate_2 = non_native_field_gate_2 * scalar_constant(1 << 68)
+    non_native_field_gate_2 = non_native_field_gate_2 - p[W_4_SHIFT]
+    non_native_field_gate_2 = non_native_field_gate_2 + limb_subproduct
+    non_native_field_gate_2 = non_native_field_gate_2 * p[Q_4]
+    limb_subproduct = limb_subproduct * scalar_constant(1 << 68)
+    limb_subproduct = limb_subproduct + (p[W_L_SHIFT] * p[W_R_SHIFT])
+    var non_native_field_gate_1 = limb_subproduct
+    non_native_field_gate_1 = non_native_field_gate_1 - (p[W_O] + p[W_4])
+    non_native_field_gate_1 = non_native_field_gate_1 * p[Q_O]
+    var non_native_field_gate_3 = limb_subproduct
+    non_native_field_gate_3 = non_native_field_gate_3 + p[W_4]
+    non_native_field_gate_3 = non_native_field_gate_3 - (p[W_O_SHIFT] + p[W_4_SHIFT])
+    non_native_field_gate_3 = non_native_field_gate_3 * p[Q_M]
+    var non_native_field_identity = non_native_field_gate_1
+        + non_native_field_gate_2
+        + non_native_field_gate_3
+    non_native_field_identity = non_native_field_identity * p[Q_R]
+    var limb_accumulator_1 = p[W_R_SHIFT] * scalar_constant(1 << 14)
+    limb_accumulator_1 = limb_accumulator_1 + p[W_L_SHIFT]
+    limb_accumulator_1 = limb_accumulator_1 * scalar_constant(1 << 14)
+    limb_accumulator_1 = limb_accumulator_1 + p[W_O]
+    limb_accumulator_1 = limb_accumulator_1 * scalar_constant(1 << 14)
+    limb_accumulator_1 = limb_accumulator_1 + p[W_R]
+    limb_accumulator_1 = limb_accumulator_1 * scalar_constant(1 << 14)
+    limb_accumulator_1 = limb_accumulator_1 + p[W_L]
+    limb_accumulator_1 = limb_accumulator_1 - p[W_4]
+    limb_accumulator_1 = limb_accumulator_1 * p[Q_4]
+    var limb_accumulator_2 = p[W_O_SHIFT] * scalar_constant(1 << 14)
+    limb_accumulator_2 = limb_accumulator_2 + p[W_R_SHIFT]
+    limb_accumulator_2 = limb_accumulator_2 * scalar_constant(1 << 14)
+    limb_accumulator_2 = limb_accumulator_2 + p[W_L_SHIFT]
+    limb_accumulator_2 = limb_accumulator_2 * scalar_constant(1 << 14)
+    limb_accumulator_2 = limb_accumulator_2 + p[W_4]
+    limb_accumulator_2 = limb_accumulator_2 * scalar_constant(1 << 14)
+    limb_accumulator_2 = limb_accumulator_2 + p[W_O]
+    limb_accumulator_2 = limb_accumulator_2 - p[W_4_SHIFT]
+    limb_accumulator_2 = limb_accumulator_2 * p[Q_M]
+    var limb_accumulator_identity = limb_accumulator_1 + limb_accumulator_2
+    limb_accumulator_identity = limb_accumulator_identity * p[Q_O]
+    var nnf_identity = non_native_field_identity + limb_accumulator_identity
+    nnf_identity = nnf_identity * (p[Q_NNF] * domain_sep)
+    evals[22] = nnf_identity
+}

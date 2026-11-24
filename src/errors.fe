@@ -1,0 +1,49 @@
+// Solidity-compatible verifier errors and library input errors.
+use ingot::field::FieldArithmeticError
+use std::evm::revert_error
+
+#[error]
+pub struct UnsupportedLogN { pub logN: u256 }
+#[error]
+pub struct ValueGeLimbMax {}
+#[error]
+pub struct ValueGeGroupOrder {}
+#[error]
+pub struct ValueGeFieldOrder {}
+#[error]
+pub struct InvertOfZero {}
+#[error]
+pub struct NotPowerOfTwo {}
+#[error]
+pub struct ProofLengthWrong {}
+#[error]
+pub struct ProofLengthWrongWithLogN {
+    pub logN: u256,
+    pub actualLength: u256,
+    pub expectedLength: u256,
+}
+#[error]
+pub struct PublicInputsLengthWrong {}
+#[error]
+pub struct SumcheckFailed {}
+#[error]
+pub struct ShpleminiFailed {}
+#[error]
+pub struct PointAtInfinity {}
+#[error]
+pub struct ConsistencyCheckFailed {}
+#[error]
+pub struct GeminiChallengeInSubgroup {}
+
+pub(ingot) fn arithmetic(_ error: FieldArithmeticError) -> ! {
+    match error {
+        FieldArithmeticError::ZeroInverse => revert_error(InvertOfZero {}),
+        FieldArithmeticError::UnsupportedExponent => revert_error(NotPowerOfTwo {}),
+        FieldArithmeticError::ModexpCallFailed | FieldArithmeticError::InvalidModexpReturnLength => {
+            // Fr.sol returns this literal, not keccak("ModExpFailed()")[0:4].
+            let data = std::abi::bytes_from_words_prefix<4, 1>([0xf8d61709 << 224])
+            std::evm::revert_bytes(data.span())
+        },
+        FieldArithmeticError::NonCanonicalModexpResult => revert_error(ValueGeFieldOrder {}),
+    }
+}

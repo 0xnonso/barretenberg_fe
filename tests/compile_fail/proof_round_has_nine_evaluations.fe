@@ -1,0 +1,6 @@
+// expect: type mismatch
+use ingot::proof::ParsedProof
+use ingot::field::Fr
+fn misuse(_ p: ParsedProof) -> [Fr; 8] {
+    p.sumcheck_univariates[0]
+}

@@ -1,0 +1,26 @@
+use core::marker::{Copy, Clearable}
+use core::ptr::MemArray
+
+/// Runtime zero initialization avoids embedding large zero-filled constants in
+/// contract bytecode. Clearable guarantees zero is a valid value of T.
+pub(ingot) fn zero_array<T, const COUNT: usize>() -> [T; COUNT] where T: Copy + Clearable {
+    let allocation = MemArray<[T; COUNT]>::new_zeroed(1)
+    allocation[0]
+}
+
+/// One zero-initialized value in its own allocation. Large protocol state
+/// (proof, transcript, MSM) is built in place and borrowed; returning it by
+/// value would copy every word through the stack in the compiled code.
+pub struct Buffer<T> { value: MemArray<T> }
+
+impl<T> Buffer<T> where T: Clearable {
+    pub fn new() -> Self {
+        Self { value: MemArray<T>::new_zeroed(1) }
+    }
+}
+
+impl<T> Buffer<T> {
+    pub fn get(mut? self) -> mut? T {
+        mut? self.value[0]
+    }
+}

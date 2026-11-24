@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: Apache-2.0
+// Port of Aztec Labs (2024) pinned Relations.sol: accumulatePoseidonInternalRelation.
+use ingot::entities::{
+    Q_L,
+    Q_POSEIDON2_INTERNAL,
+    W_4,
+    W_4_SHIFT,
+    W_L,
+    W_L_SHIFT,
+    W_O,
+    W_O_SHIFT,
+    W_R,
+    W_R_SHIFT,
+}
+use ingot::field::{Fr, scalar_constant}
+
+#[inline(never)]
+pub fn accumulate(_ p: [Fr; 41], _ evals: mut [Fr; 31], _ domain_sep: Fr) {
+    let internal_matrix_diagonal = [
+        scalar_constant(
+            0x10dc6e9c006ea38b04b1e03b4bd9490c0d03f98929ca1d7fb56821fd19d3b6e7,
+        ),
+        scalar_constant(
+            0x0c28145b6a44df3e0149b3d0a30b3bb599df9756d4dd9b84a86b38cfb45a740b,
+        ),
+        scalar_constant(
+            0x00544b8338791518b2c7645a50392798b21f75bb60e3596170067d00141cac15,
+        ),
+        scalar_constant(
+            0x222c01175718386f2e2e82eb122789e352e105a3b8fa852613bc534433ee428b,
+        ),
+    ]
+    let s1 = p[W_L] + p[Q_L]
+    let u1 = s1 * s1 * s1 * s1 * s1
+    let u2 = p[W_R]
+    let u3 = p[W_O]
+    let u4 = p[W_4]
+    let u_sum = u1 + u2 + u3 + u4
+    let q_pos_by_scaling = p[Q_POSEIDON2_INTERNAL] * domain_sep
+    let v1 = u1 * internal_matrix_diagonal[0] + u_sum
+    evals[27] = evals[27] + q_pos_by_scaling * (v1 - p[W_L_SHIFT])
+    let v2 = u2 * internal_matrix_diagonal[1] + u_sum
+    evals[28] = evals[28] + q_pos_by_scaling * (v2 - p[W_R_SHIFT])
+    let v3 = u3 * internal_matrix_diagonal[2] + u_sum
+    evals[29] = evals[29] + q_pos_by_scaling * (v3 - p[W_O_SHIFT])
+    let v4 = u4 * internal_matrix_diagonal[3] + u_sum
+    evals[30] = evals[30] + q_pos_by_scaling * (v4 - p[W_4_SHIFT])
+}

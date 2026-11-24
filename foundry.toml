@@ -1,0 +1,39 @@
+[profile.default]
+src = "reference/solidity/generated"
+test = "tests/solidity"
+out = "out/solidity"
+cache_path = "cache/solidity"
+libs = []
+remappings = ["forge-std/=.tools/forge-std/src/"]
+solc = ".tools/bin/solc"
+# Match the pinned Aztec v6 barretenberg/sol benchmark configuration.
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 1
+# Mutation sweeps perform hundreds of individually capped calls in one test.
+# These are harness budgets, not verifier transaction gas or deployment limits.
+gas_limit = 10000000000
+memory_limit = 536870912
+bytecode_hash = "none"
+fs_permissions = [
+    { access = "read", path = "./fixtures" },
+    { access = "read", path = "./out/corpus" },
+    { access = "read", path = "./out/probes" },
+]
+
+[fmt]
+# Forge 1.4.4's "preserve" mode can drop braces around compact multi-statement ifs.
+single_line_statement_blocks = "multi"
+
+[lint]
+# The reference sources and adapters deliberately retain upstream spelling/casts.
+ignore = [
+    "reference/solidity/generated/ArithmeticVerifier.sol",
+    "tests/solidity/helpers/OpeningReference.sol",
+    "tests/solidity/helpers/ArithmeticStagesReference.sol",
+    "tests/solidity/helpers/MsmReference.sol",
+    "tests/solidity/helpers/SolidityCurveReference.sol",
+    "tests/solidity/helpers/SolidityPairingReference.sol",
+    "tests/solidity/helpers/SolidityReaderReference.sol",
+    "tests/solidity/helpers/SolidityInversionProbe.sol",
+]

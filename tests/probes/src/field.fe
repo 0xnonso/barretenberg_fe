@@ -1,0 +1,72 @@
+use barretenberg_fe::field::{FieldArithmeticError, Fr}
+use ingot::support::scalar
+use core::result::Result
+use std::evm::{Call, Ctx, revert_empty}
+
+msg FieldCalls {
+    #[selector = sol("calculate(uint256,uint256)")]
+    Calculate { a: u256, b: u256 } -> (u256, u256, u256, u256, bool),
+    #[selector = sol("invert(uint256)")]
+    Invert { a: u256 } -> u256,
+    #[selector = sol("divide(uint256,uint256)")]
+    Divide { a: u256, b: u256 } -> u256,
+    #[selector = sol("pow(uint256,uint256)")]
+    Pow { a: u256, exponent: u256 } -> u256,
+    #[selector = sol("tryInvert(uint256)")]
+    TryInvert { a: u256 } -> (u256, u256),
+    #[selector = sol("tryDivide(uint256,uint256)")]
+    TryDivide { a: u256, b: u256 } -> (u256, u256),
+    #[selector = sol("tryPow(uint256,uint256)")]
+    TryPow { a: u256, exponent: u256 } -> (u256, u256),
+}
+
+pub contract FieldProbe uses (call: Call, ctx: Ctx) {
+    recv FieldCalls {
+        Calculate { a, b } -> (u256, u256, u256, u256, bool) {
+            let x = scalar(a)
+            let y = scalar(b)
+            ((x + y).to_word(), (x - y).to_word(), (x * y).to_word(), (-x).to_word(), x == y)
+        }
+        Invert { a } -> u256 uses (call, ctx) {
+            checked(scalar(a).invert())
+        }
+        Divide { a, b } -> u256 uses (call, ctx) {
+            checked(scalar(a).divide(scalar(b)))
+        }
+        Pow { a, exponent } -> u256 uses (call, ctx) {
+            checked(scalar(a).pow(exponent))
+        }
+        TryInvert { a } -> (u256, u256) uses (call, ctx) {
+            diagnostic(scalar(a).invert())
+        }
+        TryDivide { a, b } -> (u256, u256) uses (call, ctx) {
+            diagnostic(scalar(a).divide(scalar(b)))
+        }
+        TryPow { a, exponent } -> (u256, u256) uses (call, ctx) {
+            diagnostic(scalar(a).pow(exponent))
+        }
+    }
+}
+
+fn checked(_ result: Result<FieldArithmeticError, Fr>) -> u256 {
+    match result {
+        Result::Ok(value) => value.to_word(),
+        Result::Err(_) => revert_empty(),
+    }
+}
+
+fn diagnostic(_ result: Result<FieldArithmeticError, Fr>) -> (u256, u256) {
+    match result {
+        Result::Ok(value) => (0, value.to_word()),
+        Result::Err(error) => {
+            let code: u256 = match error {
+                FieldArithmeticError::ZeroInverse => 1,
+                FieldArithmeticError::UnsupportedExponent => 2,
+                FieldArithmeticError::ModexpCallFailed => 3,
+                FieldArithmeticError::InvalidModexpReturnLength => 4,
+                FieldArithmeticError::NonCanonicalModexpResult => 5,
+            }
+            (code, 0)
+        },
+    }
+}

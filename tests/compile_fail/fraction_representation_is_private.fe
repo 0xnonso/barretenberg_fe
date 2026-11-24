@@ -1,0 +1,6 @@
+// expect: not visible
+use ingot::field::{Fr, Fraction}
+
+pub fn invalid() -> Fraction {
+    Fraction { numerator: Fr::zero(), denominator: Fr::zero() }
+}

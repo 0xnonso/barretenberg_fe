@@ -1,0 +1,107 @@
+use core::result::Result
+use ingot::accumulator::aggregate
+use ingot::arrays::Buffer
+use ingot::commitments::opening_terms
+use ingot::curve::{CurveError, G1, PairingTerm, msm, pairing_check}
+use ingot::encoding::decode_proof
+use ingot::errors::{self, SumcheckFailed, ConsistencyCheckFailed, ShpleminiFailed}
+use ingot::field::coordinate_constant
+use ingot::libra::check_consistency
+use ingot::proof::Transcript
+use ingot::public_inputs::{decode_inputs, public_input_delta}
+use ingot::sumcheck::verify_sumcheck
+use ingot::transcript::generate_transcript
+use ingot::types::{EncodedG2, Fq2, MsmTerm}
+use ingot::verification_key::{MSM_CAPACITY, VerificationKey}
+use std::abi::{Bytes, Bytes32, DynArray}
+use std::evm::{Address, Call, Ctx, revert_empty, revert_error}
+
+/// Pinned UltraHonk ZK/Keccak flavor for the circuit described by `key`.
+/// The key is runtime data, so this code is identical for every circuit.
+#[inline(never)]
+pub fn verify(
+    _ key: VerificationKey,
+    _ relations: Address,
+    _ proof: own Bytes,
+    _ raw_inputs: DynArray<Bytes32>,
+) -> bool
+uses (call: Call, ctx: Ctx)
+{
+    assert!(key.is_supported())
+    let decoded = decode_proof(proof, key.log_n)
+    let p = ref decoded.get()
+    let inputs = decode_inputs(raw_inputs, key.application_inputs)
+    var transcript = Buffer<Transcript>::new()
+    let t = mut transcript.get()
+    generate_transcript(p, ref inputs, key.hash, mut t)
+    t.relation_parameters.public_inputs_delta = match public_input_delta(
+        ref inputs,
+        p.accumulator,
+        t.relation_parameters.beta,
+        t.relation_parameters.gamma,
+    ) {
+        Result::Ok(value) => value,
+        Result::Err(error) => errors::arithmetic(error),
+    }
+    if !verify_sumcheck(p, t, relations) {
+        revert_error(SumcheckFailed {})
+    }
+    var msm_terms = Buffer<[MsmTerm; MSM_CAPACITY]>::new()
+    let terms = mut msm_terms.get()
+    opening_terms(p, key, t, mut terms)
+    if !check_consistency(
+        p.libra_poly_evals,
+        t.gemini_r,
+        ref t.sumcheck_challenges,
+        p.log_n,
+        p.libra_evaluation,
+    ) {
+        revert_error(ConsistencyCheckFailed {})
+    }
+    let lhs = match msm(terms, key.msm_size()) {
+        Result::Ok(value) => value,
+        Result::Err(_) => revert_error(ShpleminiFailed {}),
+    }
+    let rhs = match G1::from_encoded(p.kzg_quotient) {
+        Result::Ok(value) => value.negate(),
+        Result::Err(_) => revert_error(ShpleminiFailed {}),
+    }
+    let (lhs, rhs) = match aggregate(lhs, rhs, p.accumulator) {
+        Result::Ok(value) => value,
+        Result::Err(_) => revert_empty(),
+    }
+    match final_pairing(lhs, rhs) {
+        Result::Ok(true) => true,
+        Result::Err(CurveError::InvalidPairingResult) => revert_empty(),
+        _ => revert_error(ShpleminiFailed {}),
+    }
+}
+
+/// Pinned setup points, never caller-selected. Order matches utils.sol pairing.
+pub fn final_pairing(_ lhs: G1, _ rhs: G1) -> Result<CurveError, bool>
+uses (call: Call, ctx: Ctx)
+{
+    let generator = g2(
+        0x198e9393920d483a7260bfb731fb5d25f1aa493335a9e71297e485b7aef312c2,
+        0x1800deef121f1e76426a00665e5c4479674322d4f75edadd46debd5cd992f6ed,
+        0x090689d0585ff075ec9e99ad690c3395bc4b313370b38ef355acdadcd122975b,
+        0x12c85ea5db8c6deb4aab71808dcb408fe3d1e7690c43d37b4ce6cc0166fa7daa,
+    )
+    let setup = g2(
+        0x260e01b251f6f1c7e7ff4e580791dee8ea51d87a358e038b4efe30fac09383c1,
+        0x0118c4d5b837bcc2bc89b5b398b5974e9f5944073b32078b7e231fec938883b0,
+        0x04fc6369f7110fe3d25156c1bb9a72859cf2a04641f99ba4ee413c80da6a5fe4,
+        0x22febda3c0c0632a56475b4214e5615e11e6dd3f96e6cea2854a87d4dacc5e55,
+    )
+    pairing_check(
+        PairingTerm { g1: lhs, g2: generator },
+        PairingTerm { g1: rhs, g2: setup },
+    )
+}
+
+fn g2(_ x_imag: u256, _ x_real: u256, _ y_imag: u256, _ y_real: u256) -> EncodedG2 {
+    EncodedG2 {
+        x: Fq2 { imag: coordinate_constant(x_imag), real: coordinate_constant(x_real) },
+        y: Fq2 { imag: coordinate_constant(y_imag), real: coordinate_constant(y_real) },
+    }
+}

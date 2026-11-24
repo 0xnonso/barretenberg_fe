@@ -1,0 +1,5 @@
+// expect: type mismatch
+use ingot::field::{Fq, Fr}
+fn misuse(_ scalar: Fr, _ coordinate: Fq) -> Fr {
+    scalar + coordinate
+}

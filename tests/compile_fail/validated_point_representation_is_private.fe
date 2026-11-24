@@ -1,0 +1,6 @@
+// expect: not visible
+use ingot::curve::G1
+use ingot::field::Fq
+fn misuse(_ x: Fq, _ y: Fq) -> G1 {
+    G1 { x, y }
+}

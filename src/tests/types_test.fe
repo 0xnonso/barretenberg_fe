@@ -1,0 +1,62 @@
+use core::result::Result
+use ingot::field::{FQ_MODULUS, FR_MODULUS, Fq, Fr}
+use ingot::types::{Digest256, EncodedG1}
+
+#[test]
+fn scalar_encoding_boundaries() {
+    assert!(scalar(0).to_word() == 0)
+    assert!(scalar(FR_MODULUS - 1).to_word() == FR_MODULUS - 1)
+    assert!(Fr::from_word(FR_MODULUS).is_err())
+    assert!(
+        Fr::from_word(
+            0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff,
+        ).is_err(),
+    )
+}
+
+#[test]
+fn coordinate_encoding_boundaries() {
+    assert!(coordinate(0).to_word() == 0)
+    assert!(coordinate(FQ_MODULUS - 1).to_word() == FQ_MODULUS - 1)
+    assert!(Fq::from_word(FQ_MODULUS).is_err())
+    assert!(
+        Fq::from_word(
+            0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff,
+        ).is_err(),
+    )
+}
+
+#[test]
+fn the_fields_have_different_domains() {
+    // A valid coordinate can be an invalid scalar. A shared u256 alias misses this.
+    assert!(Fq::from_word(FR_MODULUS).is_ok())
+    assert!(Fr::from_word(FR_MODULUS).is_err())
+}
+
+#[test]
+fn hash_reduction_is_explicit() {
+    let digest = Digest256::from_word(FR_MODULUS + 7)
+    assert!(digest.to_word() == FR_MODULUS + 7)
+    assert!(digest.reduce_to_fr().to_word() == 7)
+    assert!(Fr::from_word(digest.to_word()).is_err())
+}
+
+#[test]
+fn identity_encoding_remains_representable() {
+    let point = EncodedG1 { x: coordinate(0), y: coordinate(0) }
+    assert!(point.x.to_word() == 0 && point.y.to_word() == 0)
+}
+
+fn scalar(_ word: u256) -> Fr {
+    match Fr::from_word(word) {
+        Result::Ok(value) => value,
+        Result::Err(_) => core::panic(),
+    }
+}
+
+fn coordinate(_ word: u256) -> Fq {
+    match Fq::from_word(word) {
+        Result::Ok(value) => value,
+        Result::Err(_) => core::panic(),
+    }
+}

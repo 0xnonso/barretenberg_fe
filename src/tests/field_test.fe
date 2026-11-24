@@ -1,0 +1,68 @@
+use core::result::Result
+use ingot::field::{FR_MODULUS, Fr}
+
+#[test]
+fn scalar_constants_and_equality() {
+    assert!(Fr::zero().to_word() == 0)
+    assert!(Fr::one().to_word() == 1)
+    assert!(Fr::zero() != Fr::one())
+    assert!(scalar(1) == Fr::one())
+    assert!(Fr::from_hash_word(FR_MODULUS + 1) == Fr::one())
+}
+
+#[test]
+fn scalar_addition_wraps_at_the_field_order() {
+    let last = scalar(FR_MODULUS - 1)
+    assert!(last + Fr::one() == Fr::zero())
+    assert!((last + last).to_word() == FR_MODULUS - 2)
+    assert!(last + Fr::zero() == last)
+}
+
+#[test]
+fn scalar_subtraction_wraps_without_underflow() {
+    let last = scalar(FR_MODULUS - 1)
+    assert!(Fr::zero() - Fr::one() == last)
+    assert!(last - last == Fr::zero())
+    assert!(last - Fr::zero() == last)
+    assert!(Fr::one() - last == scalar(2))
+}
+
+#[test]
+fn scalar_multiplication_preserves_high_product_bits() {
+    let last = scalar(FR_MODULUS - 1)
+    assert!(last * last == Fr::one())
+    let large = scalar(340282366920938463463374607431768211456)
+    // Independent integer vector: (2^128 * 2^128) mod r = 2^256 mod r.
+    assert!(
+        (large * large).to_word()
+            == 6350874878119819312338956282401532410528162663560392320966563075034087161851,
+    )
+    assert!(last * Fr::zero() == Fr::zero())
+    assert!(last * Fr::one() == last)
+}
+
+#[test]
+fn scalar_negation_keeps_zero_canonical() {
+    assert!((-Fr::zero()).to_word() == 0)
+    assert!((-Fr::one()).to_word() == FR_MODULUS - 1)
+    let a = scalar(FR_MODULUS - 2)
+    assert!(a + (-a) == Fr::zero())
+    assert!(-(-a) == a)
+}
+
+#[test]
+fn scalar_composed_operations_preserve_field_laws() {
+    let a = scalar(FR_MODULUS - 1)
+    let b = scalar(FR_MODULUS - 2)
+    let c = scalar(123456789)
+    assert!(a * (b + c) == a * b + a * c)
+    assert!((a + b) - b == a)
+    assert!((a * b).to_word() < FR_MODULUS)
+}
+
+fn scalar(_ word: u256) -> Fr {
+    match Fr::from_word(word) {
+        Result::Ok(value) => value,
+        Result::Err(_) => core::panic(),
+    }
+}

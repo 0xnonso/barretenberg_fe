@@ -1,0 +1,67 @@
+use core::result::Result
+use ingot::field::{FR_MODULUS, FieldArithmeticError, Fr}
+use std::evm::{Call, Ctx}
+
+#[test]
+fn inverse_matches_small_known_values() uses (call: Call, ctx: Ctx) {
+    assert!(value(Fr::one().invert()) == Fr::one())
+    let two = Fr::one() + Fr::one()
+    let inv_two = value(two.invert())
+    assert!(inv_two.to_word() == (FR_MODULUS + 1) / 2)
+    assert!(two * inv_two == Fr::one())
+    let last = -Fr::one()
+    assert!(value(last.invert()) == last)
+}
+
+#[test]
+fn inverse_of_zero_is_a_typed_error() uses (call: Call, ctx: Ctx) {
+    let rejected = match Fr::zero().invert() {
+        Result::Err(FieldArithmeticError::ZeroInverse) => true,
+        _ => false,
+    }
+    assert!(rejected)
+}
+
+#[test]
+fn division_round_trips_and_zero_numerator_works() uses (call: Call, ctx: Ctx) {
+    let two = Fr::one() + Fr::one()
+    let three = two + Fr::one()
+    assert!(value(three.divide(two)) * two == three)
+    assert!(value(two.divide(two)) == Fr::one())
+    assert!(value(Fr::zero().divide(two)) == Fr::zero())
+}
+
+#[test]
+fn division_by_zero_preserves_the_error() uses (call: Call, ctx: Ctx) {
+    let rejected = match Fr::one().divide(Fr::zero()) {
+        Result::Err(FieldArithmeticError::ZeroInverse) => true,
+        _ => false,
+    }
+    assert!(rejected)
+    assert!(Fr::zero().divide(Fr::zero()).is_err())
+}
+
+#[test]
+fn power_policy_matches_the_pinned_reference() uses (call: Call, ctx: Ctx) {
+    let two = Fr::one() + Fr::one()
+    assert!(value(two.pow(1)) == two)
+    assert!(value(two.pow(2)) == two * two)
+    assert!(value(two.pow(4)) == (two * two) * (two * two))
+    assert!(value(Fr::zero().pow(256)) == Fr::zero())
+    let zero_rejected = match two.pow(0) {
+        Result::Err(FieldArithmeticError::UnsupportedExponent) => true,
+        _ => false,
+    }
+    let three_rejected = match two.pow(3) {
+        Result::Err(FieldArithmeticError::UnsupportedExponent) => true,
+        _ => false,
+    }
+    assert!(zero_rejected && three_rejected)
+}
+
+fn value(_ result: Result<FieldArithmeticError, Fr>) -> Fr {
+    match result {
+        Result::Ok(scalar) => scalar,
+        Result::Err(_) => core::panic(),
+    }
+}

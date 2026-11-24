@@ -1,0 +1,15 @@
+// Generated from bb 6.0.0 canonical VK JSON (N = @N@). Do not edit.
+// Only the constructor reads this; the runtime verifier is circuit-independent.
+use ingot::field::coordinate_constant
+use ingot::types::EncodedG1
+use ingot::verification_key::VerificationKey
+
+pub fn verification_key() -> VerificationKey {
+    VerificationKey {
+        log_n: @LOG_N@,
+        application_inputs: @TOTAL_INPUTS@ - 8,
+        hash: 0x@VK_HASH@,
+        commitments: [
+@COMMITMENTS@        ],
+    }
+}

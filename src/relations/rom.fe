@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: Apache-2.0
+// Port of Aztec Labs (2024) pinned Relations.sol: accumulateRomLogupRelation.
+use ingot::entities::{Q_4, Q_C, Q_L, Q_MEMORY, Q_R, W_4, W_L, W_O, W_R}
+use ingot::field::Fr
+use ingot::proof::RelationParameters
+
+#[inline(never)]
+pub fn accumulate(
+    _ p: [Fr; 41],
+    _ rp: RelationParameters,
+    _ evals: mut [Fr; 31],
+    _ domain_sep: Fr,
+) {
+    let eta_two = rp.eta * rp.eta
+    let q_logup_table = p[Q_R] * (Fr::one() - p[Q_L])
+    let q_logup_read = p[Q_4] * (Fr::one() - p[Q_L])
+    let denom = rp.rom_logup_gamma + p[W_L] + (p[W_R] * rp.eta) + (p[Q_C] * eta_two)
+    evals[20] = (q_logup_table + q_logup_read) *
+        (p[W_4] * denom - Fr::one()) *
+        (p[Q_MEMORY] * domain_sep)
+    evals[21] = (q_logup_read - q_logup_table * p[W_O]) * p[W_4] * p[Q_MEMORY]
+}

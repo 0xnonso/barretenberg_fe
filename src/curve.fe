@@ -1,0 +1,250 @@
+use core::abi::{load_word, store_word}
+use core::ops::Eq
+use core::ptr::{self, FixedMemBuffer, MemSpan}
+use core::result::Result
+use ingot::field::{FQ_MODULUS, Fq, Fr}
+use ingot::types::{EncodedG1, EncodedG2, MsmTerm}
+use std::evm::crypto::{BN254_ADD_ADDRESS, BN254_MUL_ADDRESS, BN254_PAIRING_ADDRESS, addmod, mulmod}
+use std::evm::{Address, Call, Ctx}
+
+pub enum CurveError {
+    InvalidPoint,
+    AddCallFailed,
+    MulCallFailed,
+    PairingCallFailed,
+    InvalidPairingResult,
+    InvalidPointReturnLength,
+    InvalidPairingReturnLength,
+    InvalidMsmLength,
+}
+
+impl Copy for CurveError {}
+
+/// Canonical BN254 G1 point, including the EVM identity encoding (0,0).
+/// Private coordinates can only be obtained by validation or invariant-preserving operations.
+pub struct G1 { x: Fq, y: Fq }
+
+impl Copy for G1 {}
+
+/// One pairing term: checked G1 and canonically encoded, not yet checked G2.
+pub struct PairingTerm { pub g1: G1, pub g2: EncodedG2 }
+
+impl Copy for PairingTerm {}
+
+/// Check e(first.g1, first.g2) * e(second.g1, second.g2) == 1.
+pub fn pairing_check(_ first: PairingTerm, _ second: PairingTerm) -> Result<CurveError, bool>
+uses (call: Call, ctx: Ctx)
+{
+    let input = FixedMemBuffer<384>::alloc()
+    unsafe {
+        write_pair(input.ptr(), first)
+        write_pair(ptr::offset_bytes(input.ptr(), 192), second)
+    }
+    var output = FixedMemBuffer<32>::alloc().into_buffer()
+    let outcome = call
+        .raw_staticcall(
+            addr: Address::new(BN254_PAIRING_ADDRESS),
+            gas: ctx.gas(),
+            args: input.span(),
+            ret: mut output,
+        )
+    if !outcome.success() {
+        return Result::Err(CurveError::PairingCallFailed)
+    }
+    if outcome.returndata_len() != 32 {
+        return Result::Err(CurveError::InvalidPairingReturnLength)
+    }
+    // Solidity's strict bool decoding: a successful false stays distinct from
+    // a failed call.
+    match unsafe {
+        load_word(output.ptr())
+    } {
+        0 => Result::Ok(false),
+        1 => Result::Ok(true),
+        _ => Result::Err(CurveError::InvalidPairingResult),
+    }
+}
+
+/// destination must point to at least 192 writable bytes.
+#[inline(always)]
+unsafe fn write_pair(_ destination: *u8, _ term: PairingTerm) {
+    store_word(ptr: destination, value: term.g1.x.to_word())
+    store_word(
+        ptr: ptr::offset_bytes(destination, 32),
+        value: term.g1.y.to_word(),
+    )
+    store_word(
+        ptr: ptr::offset_bytes(destination, 64),
+        value: term.g2.x.imag.to_word(),
+    )
+    store_word(
+        ptr: ptr::offset_bytes(destination, 96),
+        value: term.g2.x.real.to_word(),
+    )
+    store_word(
+        ptr: ptr::offset_bytes(destination, 128),
+        value: term.g2.y.imag.to_word(),
+    )
+    store_word(
+        ptr: ptr::offset_bytes(destination, 160),
+        value: term.g2.y.real.to_word(),
+    )
+}
+
+impl G1 {
+    /// Private trusted-output decoder. output must point to 64 initialized bytes
+    /// encoding a canonical curve point or identity, as guaranteed by a
+    /// successful BN254 addition/multiplication precompile.
+    #[inline(always)]
+    unsafe fn from_precompile_output(_ output: *u8) -> Self {
+        Self {
+            x: Fq::from_canonical_word_unchecked(load_word(output)),
+            y: Fq::from_canonical_word_unchecked(load_word(ptr::offset_bytes(output, 32))),
+        }
+    }
+
+    /// Establish curve membership without an external call. EncodedG1 already
+    /// guarantees canonical coordinates; (0,0) is the distinguished identity.
+    pub fn from_encoded(_ point: EncodedG1) -> Result<CurveError, Self> {
+        let x = point.x.to_word()
+        let y = point.y.to_word()
+        if x == 0 && y == 0 {
+            return Result::Ok(Self { x: point.x, y: point.y })
+        }
+        let x_squared = mulmod(x, x, FQ_MODULUS)
+        let rhs = addmod(mulmod(x_squared, x, FQ_MODULUS), 3, FQ_MODULUS)
+        if mulmod(y, y, FQ_MODULUS) != rhs {
+            return Result::Err(CurveError::InvalidPoint)
+        }
+        Result::Ok(Self { x: point.x, y: point.y })
+    }
+
+    pub fn to_encoded(self) -> EncodedG1 {
+        EncodedG1 { x: self.x, y: self.y }
+    }
+
+    pub fn is_identity(self) -> bool {
+        self.x.to_word() == 0 && self.y.to_word() == 0
+    }
+
+    pub fn negate(self) -> Self {
+        Self { x: self.x, y: self.y.negate() }
+    }
+
+    pub fn add(self, _ other: Self) -> Result<CurveError, Self>
+    uses (call: Call, ctx: Ctx)
+    {
+        let input = FixedMemBuffer<128>::alloc()
+        unsafe {
+            store_word(ptr: input.ptr(), value: self.x.to_word())
+            store_word(
+                ptr: ptr::offset_bytes(input.ptr(), 32),
+                value: self.y.to_word(),
+            )
+            store_word(
+                ptr: ptr::offset_bytes(input.ptr(), 64),
+                value: other.x.to_word(),
+            )
+            store_word(
+                ptr: ptr::offset_bytes(input.ptr(), 96),
+                value: other.y.to_word(),
+            )
+        }
+        call_point(BN254_ADD_ADDRESS, input.span())
+    }
+
+    /// Fr deliberately limits callers to canonical protocol scalars, although
+    /// the raw EVM precompile accepts arbitrary u256 scalars.
+    pub fn mul(self, _ scalar: Fr) -> Result<CurveError, Self>
+    uses (call: Call, ctx: Ctx)
+    {
+        let input = FixedMemBuffer<96>::alloc()
+        unsafe {
+            store_word(ptr: input.ptr(), value: self.x.to_word())
+            store_word(
+                ptr: ptr::offset_bytes(input.ptr(), 32),
+                value: self.y.to_word(),
+            )
+            store_word(
+                ptr: ptr::offset_bytes(input.ptr(), 64),
+                value: scalar.to_word(),
+            )
+        }
+        call_point(BN254_MUL_ADDRESS, input.span())
+    }
+}
+
+impl Eq for G1 {
+    fn eq(self, _ other: Self) -> bool {
+        self.x.to_word() == other.x.to_word() && self.y.to_word() == other.y.to_word()
+    }
+}
+
+fn call_point(_ address: u256, _ input: MemSpan) -> Result<CurveError, G1>
+uses (call: Call, ctx: Ctx)
+{
+    var output = FixedMemBuffer<64>::alloc().into_buffer()
+    let outcome = call
+        .raw_staticcall(
+            addr: Address::new(address),
+            gas: ctx.gas(),
+            args: input,
+            ret: mut output,
+        )
+    if !outcome.success() {
+        return Result::Err(
+            if address == BN254_ADD_ADDRESS {
+                CurveError::AddCallFailed
+            } else {
+                CurveError::MulCallFailed
+            },
+        )
+    }
+    if outcome.returndata_len() != 64 {
+        return Result::Err(CurveError::InvalidPointReturnLength)
+    }
+    Result::Ok(unsafe { G1::from_precompile_output(output.ptr()) })
+}
+
+/// Every term is validated even when its scalar is zero, as in the reference.
+/// Terms that cannot change the sum skip the multiplication and addition.
+/// Sum of the first `len` terms; capacity is fixed, the count is runtime data.
+pub fn msm<const CAPACITY: usize>(_ terms: [MsmTerm; CAPACITY], _ len: usize) -> Result<
+    CurveError,
+    G1,
+>
+uses (call: Call, ctx: Ctx)
+{
+    if len > CAPACITY {
+        return Result::Err(CurveError::InvalidMsmLength)
+    }
+    var accumulator = G1 {
+        x: ingot::field::coordinate_constant(0),
+        y: ingot::field::coordinate_constant(0),
+    }
+    for i in 0 .. len {
+        let term = terms[i]
+        let point = match G1::from_encoded(term.point) {
+            Result::Ok(value) => value,
+            Result::Err(error) => {
+                return Result::Err(error)
+            },
+        }
+        if (term.point.x.to_word() | term.point.y.to_word()) == 0 || term.scalar == Fr::zero() {
+            continue
+        }
+        let scaled = match point.mul(term.scalar) {
+            Result::Ok(value) => value,
+            Result::Err(error) => {
+                return Result::Err(error)
+            },
+        }
+        accumulator = match accumulator.add(scaled) {
+            Result::Ok(value) => value,
+            Result::Err(error) => {
+                return Result::Err(error)
+            },
+        }
+    }
+    Result::Ok(accumulator)
+}

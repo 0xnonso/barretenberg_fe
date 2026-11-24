@@ -1,0 +1,73 @@
+// Words are in EIP-197 order, not the verifier proof format.
+use barretenberg_fe::curve::{CurveError, G1, PairingTerm, pairing_check}
+use barretenberg_fe::field::Fq
+use barretenberg_fe::types::{EncodedG1, EncodedG2, Fq2}
+use core::result::Result
+use std::evm::{Call, Ctx, revert_empty}
+
+msg PairingCalls {
+    #[selector = sol("check(uint256[12])")]
+    Check { words: [u256; 12] } -> (u256, bool),
+}
+
+pub contract PairingProbe uses (call: Call, ctx: Ctx) {
+    recv PairingCalls {
+        Check { words } -> (u256, bool) uses (call, ctx) {
+            let first = match term(words, 0) {
+                Result::Ok(value) => value,
+                Result::Err(_) => {
+                    return (1, false)
+                },
+            }
+            let second = match term(words, 6) {
+                Result::Ok(value) => value,
+                Result::Err(_) => {
+                    return (1, false)
+                },
+            }
+            match pairing_check(first, second) {
+                Result::Ok(value) => (0, value),
+                Result::Err(error) => {
+                    let code: u256 = match error {
+                        CurveError::InvalidPoint => 1,
+                        CurveError::AddCallFailed => 2,
+                        CurveError::MulCallFailed => 3,
+                        CurveError::PairingCallFailed => 7,
+                        CurveError::InvalidPairingResult => 8,
+                        CurveError::InvalidPointReturnLength => 4,
+                        CurveError::InvalidPairingReturnLength => 9,
+                        CurveError::InvalidMsmLength => 10,
+                    }
+                    (code, false)
+                },
+            }
+        }
+    }
+}
+
+fn term(_ words: [u256; 12], _ start: usize) -> Result<CurveError, PairingTerm> {
+    let g1 = match G1::from_encoded(
+        EncodedG1 { x: coordinate(words[start]), y: coordinate(words[start + 1]) },
+    ) {
+        Result::Ok(value) => value,
+        Result::Err(error) => {
+            return Result::Err(error)
+        },
+    }
+    Result::Ok(
+        PairingTerm {
+            g1,
+            g2: EncodedG2 {
+                x: Fq2 { imag: coordinate(words[start + 2]), real: coordinate(words[start + 3]) },
+                y: Fq2 { imag: coordinate(words[start + 4]), real: coordinate(words[start + 5]) },
+            },
+        },
+    )
+}
+
+fn coordinate(_ word: u256) -> Fq {
+    match Fq::from_word(word) {
+        Result::Ok(value) => value,
+        Result::Err(_) => revert_empty(),
+    }
+}

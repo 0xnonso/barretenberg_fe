@@ -1,0 +1,6 @@
+// expect: type mismatch
+use ingot::curve::G1
+use std::evm::{Call, Ctx}
+fn misuse(_ a: G1, _ b: G1) -> G1 uses (call: Call, ctx: Ctx) {
+    a.add(b)
+}

@@ -1,0 +1,109 @@
+use barretenberg_fe::arrays::Buffer
+use barretenberg_fe::circuit::verification_key
+use barretenberg_fe::commitments::{squares, fold_evaluations, opening_terms}
+use barretenberg_fe::curve::{CurveError, msm}
+use barretenberg_fe::encoding::{decode_proof, proof_bytes}
+use barretenberg_fe::field::Fr
+use barretenberg_fe::libra::check_consistency
+use barretenberg_fe::proof::{ProofBuffer, Transcript}
+use barretenberg_fe::sumcheck::check_rounds
+use barretenberg_fe::transcript::{
+    gate_challenges,
+    sumcheck_challenges,
+    opening_challenges,
+    generate_transcript,
+}
+use barretenberg_fe::types::{EncodedG1, MsmTerm}
+use barretenberg_fe::verification_key::{MAX_LOG_N, MSM_CAPACITY}
+use core::ptr::MemArray
+use core::result::Result
+use std::abi::Bytes
+use std::evm::{Call, Ctx}
+
+msg BoundsCalls {
+    #[selector = sol("decode(bytes,uint256)")]
+    Decode { data: Bytes, log_n: usize } -> u256,
+    #[selector = sol("stage(uint256,uint256)")]
+    Stage { mode: u256, log_n: usize } -> bool,
+    #[selector = sol("msm(uint256)")]
+    Msm { len: usize } -> u256,
+}
+
+pub contract BoundsProbe uses (call: Call, ctx: Ctx) {
+    recv BoundsCalls {
+        Decode { data, log_n } -> u256 {
+            let decoded = decode_proof(data, log_n)
+            decoded.get().log_n as u256
+        }
+        Stage { mode, log_n } -> bool uses (call, ctx) {
+            var proof = ProofBuffer::new()
+            let p = mut proof.get()
+            p.log_n = log_n
+            var transcript = Buffer<Transcript>::new()
+            let t = mut transcript.get()
+            var values = [Fr::zero(); MAX_LOG_N]
+            match mode {
+                0 => {
+                    proof_bytes(log_n) > 0
+                },
+                1 => {
+                    squares(Fr::one(), log_n, mut values)
+                    true
+                },
+                2 => {
+                    fold_evaluations(
+                        values,
+                        Fr::zero(),
+                        values,
+                        [Fr::one(); MAX_LOG_N],
+                        log_n,
+                        mut values,
+                    )
+                    true
+                },
+                3 => {
+                    t.sumcheck_challenges = [-Fr::one(); MAX_LOG_N]
+                    check_rounds(p, t).is_ok()
+                },
+                4 => {
+                    check_consistency([Fr::zero(); 4], Fr::zero(), ref values, log_n, Fr::zero())
+                },
+                5 => {
+                    gate_challenges(Fr::zero(), log_n, mut values)
+                    true
+                },
+                6 => {
+                    sumcheck_challenges(Fr::zero(), p, mut values)
+                    true
+                },
+                7 => {
+                    let _ = opening_challenges(Fr::zero(), p)
+                    true
+                },
+                8 => {
+                    let inputs = MemArray<Fr>::new_zeroed(0)
+                    generate_transcript(p, ref inputs, 0, mut t)
+                    true
+                },
+                9 => {
+                    var key = verification_key()
+                    key.log_n = log_n
+                    t.gemini_r = Fr::one()
+                    t.shplonk_z = -Fr::one() - Fr::one()
+                    var terms = Buffer<[MsmTerm; MSM_CAPACITY]>::new()
+                    opening_terms(p, key, t, mut terms.get())
+                    true
+                },
+                _ => core::panic(),
+            }
+        }
+        Msm { len } -> u256 uses (call, ctx) {
+            let terms = [MsmTerm { point: EncodedG1::generator(), scalar: Fr::one() }; 1]
+            match msm(terms, len) {
+                Result::Ok(point) => if point.is_identity() { 0 } else { 1 },
+                Result::Err(CurveError::InvalidMsmLength) => 2,
+                _ => core::panic(),
+            }
+        }
+    }
+}

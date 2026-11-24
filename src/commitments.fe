@@ -1,0 +1,169 @@
+// SPDX-License-Identifier: Apache-2.0
+// Port of pinned Aztec CommitmentScheme.sol and BaseZKHonkVerifier.verifyShplemini.
+use ingot::arrays::Buffer
+use ingot::field::{Fr, batch_invert, scalar_constant}
+use ingot::proof::{ParsedProof, Transcript}
+use ingot::types::{EncodedG1, MsmTerm}
+use ingot::verification_key::{MAX_LOG_N, MSM_CAPACITY, VerificationKey}
+use std::evm::{Call, Ctx}
+
+/// z - r, z + r, r, z - g*r, z - 1, and two per fold after the first.
+const OPENING_DENOMINATORS: usize = 2 * MAX_LOG_N + 3
+
+/// r^(2^i) for each fold i < log_n.
+pub fn squares(_ r: Fr, _ log_n: usize, _ powers: mut [Fr; MAX_LOG_N]) {
+    ingot::verification_key::require_supported_log_n(log_n)
+    powers[0] = r
+    for i in 1 .. log_n {
+        powers[i] = powers[i - 1] * powers[i - 1]
+    }
+}
+
+/// Recover positive Gemini evaluations, working backwards through the folds.
+pub fn fold_evaluations(
+    _ challenges: [Fr; MAX_LOG_N],
+    _ batched_evaluation: Fr,
+    _ negative_evaluations: [Fr; MAX_LOG_N],
+    _ powers: [Fr; MAX_LOG_N],
+    _ log_n: usize,
+    _ positive: mut [Fr; MAX_LOG_N],
+)
+uses (call: Call, ctx: Ctx)
+{
+    ingot::verification_key::require_supported_log_n(log_n)
+    var denominators = Buffer<[Fr; MAX_LOG_N]>::new()
+    let inverses = mut denominators.get()
+    for i in 0 .. log_n {
+        inverses[i] = powers[i] * (Fr::one() - challenges[i]) + challenges[i]
+    }
+    batch_invert(mut inverses, log_n)
+    var accumulator = batched_evaluation
+    var i = log_n
+    while i > 0 {
+        i -= 1
+        let power = powers[i]
+        let u = challenges[i]
+        let numerator = power * accumulator * scalar_constant(2) -
+            negative_evaluations[i] * (power * (Fr::one() - u) - u)
+        accumulator = numerator * inverses[i]
+        positive[i] = accumulator
+    }
+}
+
+/// Write the ordered MSM terms for the combined Shplonk/Gemini/Libra opening claim.
+/// The first `42 + log_n` terms are used. Callers must also check Libra consistency.
+pub fn opening_terms(
+    _ p: ParsedProof,
+    _ vk: VerificationKey,
+    _ t: Transcript,
+    _ terms: mut [MsmTerm; MSM_CAPACITY],
+)
+uses (call: Call, ctx: Ctx)
+{
+    ingot::verification_key::require_supported_log_n(p.log_n)
+    assert!(vk.is_supported() && vk.log_n == p.log_n)
+    var folds = Buffer<[[Fr; MAX_LOG_N]; 2]>::new()
+    let fold = mut folds.get()
+    squares(t.gemini_r, p.log_n, mut fold[0])
+    let powers = ref fold[0]
+    let generator = scalar_constant(
+        0x07b0c561a6148404f086204a9f36ffb0617942546750f230c893619174a57a76,
+    )
+    var denominators = Buffer<[Fr; OPENING_DENOMINATORS]>::new()
+    let inverses = mut denominators.get()
+    inverses[0] = t.shplonk_z - powers[0]
+    inverses[1] = t.shplonk_z + powers[0]
+    inverses[2] = t.gemini_r
+    inverses[3] = t.shplonk_z - generator * t.gemini_r
+    inverses[4] = t.shplonk_z - Fr::one()
+    for i in 1 .. p.log_n {
+        inverses[3 + 2 * i] = t.shplonk_z - powers[i]
+        inverses[4 + 2 * i] = t.shplonk_z + powers[i]
+    }
+    batch_invert(mut inverses, 3 + 2 * p.log_n)
+    let positive_inverse = inverses[0]
+    let negative_inverse = inverses[1]
+    let unshifted = -(positive_inverse + t.shplonk_nu * negative_inverse)
+    let shifted = -(inverses[2] * (positive_inverse - t.shplonk_nu * negative_inverse))
+    terms[0] = MsmTerm { point: p.shplonk_q, scalar: Fr::one() }
+    terms[1].point = p.gemini_masking_poly
+    for i in 0 .. 28 {
+        terms[i + 2].point = vk.commitments[i]
+    }
+    let witness = [
+        p.w1,
+        p.w2,
+        p.w3,
+        p.w4,
+        p.z_perm,
+        p.lookup_inverses,
+        p.lookup_read_counts,
+        p.lookup_read_tags,
+    ]
+    for i in 0 .. 8 {
+        terms[i + 30].point = witness[i]
+    }
+    var rho_power = Fr::one()
+    var batched_evaluation = Fr::zero()
+    for i in 0 .. 37 {
+        terms[i + 1].scalar = unshifted * rho_power
+        batched_evaluation = batched_evaluation + p.evaluations[i] * rho_power
+        rho_power = rho_power * t.rho
+    }
+    for i in 0 .. 5 {
+        terms[i + 30].scalar = terms[i + 30].scalar + shifted * rho_power
+        batched_evaluation = batched_evaluation + p.evaluations[i + 37] * rho_power
+        rho_power = rho_power * t.rho
+    }
+    fold_evaluations(
+        t.sumcheck_challenges,
+        batched_evaluation,
+        p.gemini_a_evaluations,
+        powers,
+        p.log_n,
+        mut fold[1],
+    )
+    let positive = ref fold[1]
+    var constant_term = positive[0] * positive_inverse
+        + p.gemini_a_evaluations[0] * t.shplonk_nu * negative_inverse
+    var nu_power = t.shplonk_nu * t.shplonk_nu
+    for i in 0 .. p.log_n - 1 {
+        let positive_scale = nu_power * inverses[5 + 2 * i]
+        let negative_scale = nu_power * t.shplonk_nu * inverses[6 + 2 * i]
+        terms[38 + i] = MsmTerm {
+            point: p.gemini_fold_comms[i],
+            scalar: -positive_scale - negative_scale,
+        }
+        constant_term = constant_term
+            + positive_scale * positive[i + 1]
+            + negative_scale * p.gemini_a_evaluations[i + 1]
+        nu_power = nu_power * t.shplonk_nu * t.shplonk_nu
+    }
+    // Five Libra claims: r, g*r, r, 1, r. Boundary claim at 1 has value zero.
+    let libra_inverses = [
+        positive_inverse,
+        inverses[3],
+        positive_inverse,
+        inverses[4],
+        positive_inverse,
+    ]
+    var scales = ingot::arrays::zero_array<Fr, 5>()
+    for i in 0 .. 5 {
+        let scale = libra_inverses[i] * nu_power
+        scales[i] = -scale
+        nu_power = nu_power * t.shplonk_nu
+        if i != 3 {
+            let index = if i < 3 { i } else { i - 1 }
+            constant_term = constant_term + scale * p.libra_poly_evals[index]
+        }
+    }
+    let boundary: usize = 37 + p.log_n
+    terms[boundary] = MsmTerm { point: p.libra_commitments[0], scalar: scales[0] }
+    terms[boundary + 1] = MsmTerm {
+        point: p.libra_commitments[1],
+        scalar: scales[1] + scales[2] + scales[3],
+    }
+    terms[boundary + 2] = MsmTerm { point: p.libra_commitments[2], scalar: scales[4] }
+    terms[boundary + 3] = MsmTerm { point: EncodedG1::generator(), scalar: constant_term }
+    terms[boundary + 4] = MsmTerm { point: p.kzg_quotient, scalar: t.shplonk_z }
+}

@@ -1,0 +1,41 @@
+use barretenberg_fe::field::Fr
+use barretenberg_fe::public_inputs::public_input_delta
+use barretenberg_fe::sumcheck::interpolate
+use core::ptr::MemArray
+use core::result::Result
+use ingot::support::scalar
+use std::evm::{Call, Ctx, revert_empty}
+
+msg ArithmeticStageCalls {
+    #[selector = sol("delta(uint256[11])")]
+    Delta { words: [u256; 11] } -> u256,
+    #[selector = sol("interpolate(uint256[9],uint256)")]
+    Interpolate { values: [u256; 9], u: u256 } -> u256,
+}
+
+pub contract ArithmeticStagesProbe uses (call: Call, ctx: Ctx) {
+    recv ArithmeticStageCalls {
+        Delta { words } -> u256 uses (call, ctx) {
+            var limbs = [Fr::zero(); 8]
+            for i in 0 .. 8 {
+                limbs[i] = scalar(words[i + 1])
+            }
+            var inputs = MemArray<Fr>::new_zeroed(1)
+            inputs[0] = scalar(words[0])
+            match public_input_delta(ref inputs, limbs, scalar(words[9]), scalar(words[10])) {
+                Result::Ok(value) => value.to_word(),
+                Result::Err(_) => revert_empty(),
+            }
+        }
+        Interpolate { values, u } -> u256 uses (call, ctx) {
+            var round = [Fr::zero(); 9]
+            for i in 0 .. 9 {
+                round[i] = scalar(values[i])
+            }
+            match interpolate(round, scalar(u)) {
+                Result::Ok(value) => value.to_word(),
+                Result::Err(_) => revert_empty(),
+            }
+        }
+    }
+}

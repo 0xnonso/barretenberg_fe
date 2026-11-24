@@ -1,0 +1,39 @@
+use ingot::support::{decode, single_input, transcript}
+use std::abi::{Bytes, Bytes32, DynArray}
+
+msg TranscriptCalls {
+    #[selector = sol("transcript(bytes,bytes32[])")]
+    Transcript { data: Bytes, inputs: DynArray<Bytes32> } -> [u256; 49],
+}
+
+pub contract TranscriptProbe {
+    recv TranscriptCalls {
+        Transcript { data, inputs } -> [u256; 49] {
+            let public_inputs = single_input(inputs)
+            let decoded = decode(data)
+            let p = ref decoded.get()
+            let transcript = transcript(p, ref public_inputs)
+            let t = ref transcript.get()
+            var words = [0; 49]
+            words[0] = t.relation_parameters.eta.to_word()
+            words[1] = t.relation_parameters.rom_logup_gamma.to_word()
+            words[2] = t.relation_parameters.beta.to_word()
+            words[3] = t.relation_parameters.gamma.to_word()
+            for i in 0 .. 30 {
+                words[4 + i] = t.alphas[i].to_word()
+            }
+            for i in 0 .. 5 {
+                words[34 + i] = t.gate_challenges[i].to_word()
+            }
+            words[39] = t.libra_challenge.to_word()
+            for i in 0 .. 5 {
+                words[40 + i] = t.sumcheck_challenges[i].to_word()
+            }
+            words[45] = t.rho.to_word()
+            words[46] = t.gemini_r.to_word()
+            words[47] = t.shplonk_nu.to_word()
+            words[48] = t.shplonk_z.to_word()
+            words
+        }
+    }
+}

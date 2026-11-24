@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: Apache-2.0
+// Port of Aztec Labs (2024) pinned Relations.sol: accumulateEllipticRelation.
+use ingot::entities::{Q_ELLIPTIC, Q_L, Q_M, W_4_SHIFT, W_L_SHIFT, W_O, W_O_SHIFT, W_R, W_R_SHIFT}
+use ingot::field::{Fr, scalar_constant}
+
+#[inline(never)]
+pub fn accumulate(_ p: [Fr; 41], _ evals: mut [Fr; 31], _ domain_sep: Fr) {
+    let x_1 = p[W_R]
+    let y_1 = p[W_O]
+    let x_2 = p[W_L_SHIFT]
+    let y_2 = p[W_4_SHIFT]
+    let y_3 = p[W_O_SHIFT]
+    let x_3 = p[W_R_SHIFT]
+    let q_sign = p[Q_L]
+    let q_is_double = p[Q_M]
+    let x_diff = (x_2 - x_1)
+    let y1_sqr = (y_1 * y_1)
+    {
+        let partialEval = domain_sep
+        let y2_sqr = (y_2 * y_2)
+        let y1y2 = y_1 * y_2 * q_sign
+        var x_add_identity = (x_3 + x_2 + x_1)
+        x_add_identity = x_add_identity * x_diff * x_diff
+        x_add_identity = x_add_identity - y2_sqr - y1_sqr + y1y2 + y1y2
+        evals[12] = x_add_identity * partialEval * p[Q_ELLIPTIC] * (Fr::one() - q_is_double)
+    }
+    {
+        let y1_plus_y3 = y_1 + y_3
+        let y_diff = y_2 * q_sign - y_1
+        let y_add_identity = y1_plus_y3 * x_diff + (x_3 - x_1) * y_diff
+        evals[13] = y_add_identity * domain_sep * p[Q_ELLIPTIC] * (Fr::one() - q_is_double)
+    }
+    {
+        let x_pow_4 = (y1_sqr + scalar_constant(17)) * x_1
+        var y1_sqr_mul_4 = y1_sqr + y1_sqr
+        y1_sqr_mul_4 = y1_sqr_mul_4 + y1_sqr_mul_4
+        let x1_pow_4_mul_9 = x_pow_4 * scalar_constant(9)
+        let x_double_identity = (x_3 + x_1 + x_1) * y1_sqr_mul_4 - x1_pow_4_mul_9
+        let acc = x_double_identity * domain_sep * p[Q_ELLIPTIC] * q_is_double
+        evals[12] = evals[12] + acc
+    }
+    {
+        let x1_sqr_mul_3 = (x_1 + x_1 + x_1) * x_1
+        let y_double_identity = x1_sqr_mul_3 * (x_1 - x_3) - (y_1 + y_1) * (y_1 + y_3)
+        evals[13] = evals[13] + y_double_identity * domain_sep * p[Q_ELLIPTIC] * q_is_double
+    }
+}

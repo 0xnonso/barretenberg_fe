@@ -1,0 +1,68 @@
+use barretenberg_fe::encoding::{ProofReadError, ProofReader}
+use core::result::Result
+use std::abi::Bytes
+use std::evm::revert_empty
+
+msg ReaderCalls {
+    #[selector = sol("read(bytes,uint256,uint256)")]
+    Read { data: Bytes, start: u256, kind: u256 } -> (u256, u256, u256, u256, u256),
+}
+
+pub contract ReaderProbe {
+    recv ReaderCalls {
+        Read { data, start, kind } -> (u256, u256, u256, u256, u256) {
+            var reader = ProofReader::new(data)
+            if reader.skip(start).is_err() {
+                return (1, 0, 0, reader.position(), reader.remaining())
+            }
+            var first: u256 = 0
+            var second: u256 = 0
+            let code = if kind == 0 {
+                match reader.read_word() {
+                    Result::Ok(value) => {
+                        first = value
+                        0
+                    },
+                    Result::Err(error) => error_code(error),
+                }
+            } else if kind == 1 {
+                match reader.read_fr() {
+                    Result::Ok(value) => {
+                        first = value.to_word()
+                        0
+                    },
+                    Result::Err(error) => error_code(error),
+                }
+            } else if kind == 2 {
+                match reader.read_fq() {
+                    Result::Ok(value) => {
+                        first = value.to_word()
+                        0
+                    },
+                    Result::Err(error) => error_code(error),
+                }
+            } else if kind == 3 {
+                match reader.read_g1() {
+                    Result::Ok(value) => {
+                        first = value.x.to_word()
+                        second = value.y.to_word()
+                        0
+                    },
+                    Result::Err(error) => error_code(error),
+                }
+            } else {
+                revert_empty()
+            }
+            (code, first, second, reader.position(), reader.remaining())
+        }
+    }
+}
+
+fn error_code(_ error: ProofReadError) -> u256 {
+    match error {
+        ProofReadError::UnexpectedEnd => 1,
+        ProofReadError::NonCanonicalScalar => 2,
+        ProofReadError::NonCanonicalCoordinate => 3,
+        ProofReadError::TrailingBytes => 4,
+    }
+}

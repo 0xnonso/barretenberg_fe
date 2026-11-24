@@ -1,0 +1,51 @@
+use core::ptr::MemArray
+use core::result::Result
+use ingot::errors::{PublicInputsLengthWrong, ValueGeFieldOrder}
+use ingot::field::{FieldArithmeticError, Fr, scalar_constant}
+use std::abi::{Bytes32, DynArray}
+use std::evm::{Call, Ctx, revert_error}
+
+/// Check the application inputs once at the ABI boundary: the key's count and
+/// canonical scalars. The count is a runtime value, as in Solidity's
+/// `bytes32[] calldata`, so it never changes the compiled verifier.
+pub fn decode_inputs(_ raw: DynArray<Bytes32>, _ expected: usize) -> MemArray<Fr> {
+    if raw.len() != expected {
+        revert_error(PublicInputsLengthWrong {})
+    }
+    var inputs = MemArray<Fr>::new_zeroed(expected)
+    for i in 0 .. expected {
+        inputs[i] = match Fr::from_word(raw.get(i).val) {
+            Result::Ok(value) => value,
+            Result::Err(_) => revert_error(ValueGeFieldOrder {}),
+        }
+    }
+    inputs
+}
+
+/// Permutation correction for application inputs followed by eight accumulator
+/// limbs. The pinned protocol places them after four disabled rows and one zero row.
+pub fn public_input_delta(
+    _ inputs: ref MemArray<Fr>,
+    _ accumulator: [Fr; 8],
+    _ beta: Fr,
+    _ gamma: Fr,
+) -> Result<FieldArithmeticError, Fr>
+uses (call: Call, ctx: Ctx)
+{
+    var numerator = Fr::one()
+    var denominator = Fr::one()
+    var numerator_acc = gamma + beta * scalar_constant((1 << 28) + 5)
+    var denominator_acc = gamma - beta * scalar_constant(6)
+    for i in 0 .. inputs.len() + 8 {
+        let input = if i < inputs.len() {
+            inputs[i]
+        } else {
+            accumulator[i - inputs.len()]
+        }
+        numerator = numerator * (numerator_acc + input)
+        denominator = denominator * (denominator_acc + input)
+        numerator_acc = numerator_acc + beta
+        denominator_acc = denominator_acc - beta
+    }
+    numerator.divide(denominator)
+}

@@ -1,0 +1,41 @@
+// Helpers for the arithmetic fixture (log_n = 5, one application input).
+use barretenberg_fe::arrays::Buffer
+use barretenberg_fe::circuit::verification_key
+use barretenberg_fe::encoding::decode_proof
+use barretenberg_fe::field::Fr
+use barretenberg_fe::proof::{ProofBuffer, Transcript}
+use barretenberg_fe::transcript::generate_transcript
+use core::ptr::MemArray
+use core::result::Result
+use std::abi::{Bytes, Bytes32, DynArray}
+use std::evm::revert_empty
+
+pub const LOG_N: usize = 5
+
+pub fn decode(_ data: own Bytes) -> ProofBuffer {
+    decode_proof(data, LOG_N)
+}
+
+pub fn single_input(_ inputs: DynArray<Bytes32>) -> MemArray<Fr> {
+    if inputs.len() != 1 {
+        revert_empty()
+    }
+    var values = MemArray<Fr>::new_zeroed(1)
+    values[0] = scalar(inputs.get(0).val)
+    values
+}
+
+pub fn transcript(_ p: barretenberg_fe::proof::ParsedProof, _ inputs: ref MemArray<Fr>) -> Buffer<
+    Transcript,
+> {
+    var buffer = Buffer<Transcript>::new()
+    generate_transcript(p, inputs, verification_key().hash, mut buffer.get())
+    buffer
+}
+
+pub fn scalar(_ word: u256) -> Fr {
+    match Fr::from_word(word) {
+        Result::Ok(value) => value,
+        Result::Err(_) => revert_empty(),
+    }
+}

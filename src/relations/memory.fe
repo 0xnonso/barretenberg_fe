@@ -1,0 +1,77 @@
+// SPDX-License-Identifier: Apache-2.0
+// Port of Aztec Labs (2024) pinned Relations.sol: accumulateMemoryRelation.
+use ingot::entities::{
+    Q_4,
+    Q_C,
+    Q_L,
+    Q_M,
+    Q_MEMORY,
+    Q_O,
+    Q_R,
+    W_4,
+    W_4_SHIFT,
+    W_L,
+    W_L_SHIFT,
+    W_O,
+    W_O_SHIFT,
+    W_R,
+    W_R_SHIFT,
+}
+use ingot::field::{Fr, scalar_constant}
+use ingot::proof::RelationParameters
+
+#[inline(never)]
+pub fn accumulate(
+    _ p: [Fr; 41],
+    _ rp: RelationParameters,
+    _ evals: mut [Fr; 31],
+    _ domain_sep: Fr,
+) {
+    let eta_two = rp.eta * rp.eta
+    let eta_three = eta_two * rp.eta
+    var memory_record_check = p[W_O] * eta_three
+    memory_record_check = memory_record_check + (p[W_R] * eta_two)
+    memory_record_check = memory_record_check + (p[W_L] * rp.eta)
+    memory_record_check = memory_record_check + p[Q_C]
+    let partial_record_check = memory_record_check
+    memory_record_check = memory_record_check - p[W_4]
+    let index_delta = p[W_L_SHIFT] - p[W_L]
+    let record_delta = p[W_4_SHIFT] - p[W_4]
+    let index_is_monotonically_increasing = index_delta * (index_delta - scalar_constant(1))
+    let adjacent_values_match_if_adjacent_indices_match = (index_delta * (-Fr::one()) + Fr::one()) *
+        record_delta
+    evals[15] = adjacent_values_match_if_adjacent_indices_match *
+        (p[Q_L] * p[Q_R]) *
+        (p[Q_MEMORY] * domain_sep)
+    evals[16] = index_is_monotonically_increasing * (p[Q_L] * p[Q_R]) * (p[Q_MEMORY] * domain_sep)
+    let ROM_consistency_check_identity = memory_record_check * (p[Q_L] * p[Q_R])
+    let access_type = (p[W_4] - partial_record_check)
+    let access_check = access_type * (access_type - scalar_constant(1))
+    var next_gate_access_type = p[W_O_SHIFT] * eta_three
+    next_gate_access_type = next_gate_access_type + (p[W_R_SHIFT] * eta_two)
+    next_gate_access_type = next_gate_access_type + (p[W_L_SHIFT] * rp.eta)
+    next_gate_access_type = p[W_4_SHIFT] - next_gate_access_type
+    let value_delta = p[W_O_SHIFT] - p[W_O]
+    let adjacent_values_match_if_adjacent_indices_match_and_next_access_is_a_read_operation = (index_delta *
+                (-Fr::one())
+            + Fr::one()) *
+        value_delta *
+        (next_gate_access_type * (-Fr::one()) + Fr::one())
+    let next_gate_access_type_is_boolean = next_gate_access_type * next_gate_access_type -
+        next_gate_access_type
+    evals[17] = adjacent_values_match_if_adjacent_indices_match_and_next_access_is_a_read_operation *
+        (p[Q_O]) *
+        (p[Q_MEMORY] * domain_sep)
+    evals[18] = index_is_monotonically_increasing * (p[Q_O]) * (p[Q_MEMORY] * domain_sep)
+    evals[19] = next_gate_access_type_is_boolean * (p[Q_O]) * (p[Q_MEMORY] * domain_sep)
+    let RAM_consistency_check_identity = access_check * (p[Q_O])
+    let timestamp_delta = p[W_R_SHIFT] - p[W_R]
+    let RAM_timestamp_check_identity = (index_delta * (-Fr::one()) + Fr::one()) * timestamp_delta -
+        p[W_O]
+    var memory_identity = ROM_consistency_check_identity
+    memory_identity = memory_identity + RAM_timestamp_check_identity * (p[Q_4] * p[Q_L])
+    memory_identity = memory_identity + memory_record_check * (p[Q_M] * p[Q_L])
+    memory_identity = memory_identity + RAM_consistency_check_identity
+    memory_identity = memory_identity * (p[Q_MEMORY] * domain_sep)
+    evals[14] = memory_identity
+}

@@ -1,0 +1,131 @@
+use barretenberg_fe::curve::{CurveError, G1}
+use barretenberg_fe::field::{Fq, Fr}
+use barretenberg_fe::types::EncodedG1
+use core::result::Result
+use std::evm::{Call, Ctx, revert_empty}
+
+msg CurveCalls {
+    #[selector = sol("add(uint256,uint256,uint256,uint256)")]
+    Add { x1: u256, y1: u256, x2: u256, y2: u256 } -> (u256, u256),
+    #[selector = sol("mul(uint256,uint256,uint256)")]
+    Mul { x: u256, y: u256, scalar: u256 } -> (u256, u256),
+    #[selector = sol("negate(uint256,uint256)")]
+    Negate { x: u256, y: u256 } -> (u256, u256),
+    #[selector = sol("validate(uint256,uint256)")]
+    Validate { x: u256, y: u256 } -> (u256, u256),
+    #[selector = sol("tryAdd(uint256,uint256,uint256,uint256)")]
+    TryAdd { x1: u256, y1: u256, x2: u256, y2: u256 } -> (u256, u256, u256),
+    #[selector = sol("tryMul(uint256,uint256,uint256)")]
+    TryMul { x: u256, y: u256, scalar: u256 } -> (u256, u256, u256),
+    #[selector = sol("tryValidate(uint256,uint256)")]
+    TryValidate { x: u256, y: u256 } -> (u256, u256, u256),
+}
+
+pub contract CurveProbe uses (call: Call, ctx: Ctx) {
+    recv CurveCalls {
+        Add { x1, y1, x2, y2 } -> (u256, u256) uses (call, ctx) {
+            words(checked(add_points(x1, y1, x2, y2)))
+        }
+        Mul { x, y, scalar } -> (u256, u256) uses (call, ctx) {
+            words(checked(multiply_point(x, y, scalar)))
+        }
+        Negate { x, y } -> (u256, u256) {
+            words(checked(point(x, y)).negate())
+        }
+        Validate { x, y } -> (u256, u256) {
+            words(checked(point(x, y)))
+        }
+        TryAdd { x1, y1, x2, y2 } -> (u256, u256, u256)
+        uses (call, ctx)
+        {
+            diagnostic(add_points(x1, y1, x2, y2))
+        }
+        TryMul { x, y, scalar } -> (u256, u256, u256)
+        uses (call, ctx)
+        {
+            diagnostic(multiply_point(x, y, scalar))
+        }
+        TryValidate { x, y } -> (u256, u256, u256) {
+            diagnostic(point(x, y))
+        }
+    }
+}
+
+fn add_points(_ x1: u256, _ y1: u256, _ x2: u256, _ y2: u256) -> Result<CurveError, G1>
+uses (call: Call, ctx: Ctx)
+{
+    let lhs = match point(x1, y1) {
+        Result::Ok(value) => value,
+        Result::Err(error) => {
+            return Result::Err(error)
+        },
+    }
+    let rhs = match point(x2, y2) {
+        Result::Ok(value) => value,
+        Result::Err(error) => {
+            return Result::Err(error)
+        },
+    }
+    lhs.add(rhs)
+}
+
+fn multiply_point(_ x: u256, _ y: u256, _ scalar: u256) -> Result<CurveError, G1>
+uses (call: Call, ctx: Ctx)
+{
+    let base = match point(x, y) {
+        Result::Ok(value) => value,
+        Result::Err(error) => {
+            return Result::Err(error)
+        },
+    }
+    let value = match Fr::from_word(scalar) {
+        Result::Ok(value) => value,
+        Result::Err(_) => revert_empty(),
+    }
+    base.mul(value)
+}
+
+fn point(_ x: u256, _ y: u256) -> Result<CurveError, G1> {
+    G1::from_encoded(EncodedG1 { x: coordinate(x), y: coordinate(y) })
+}
+
+fn coordinate(_ word: u256) -> Fq {
+    match Fq::from_word(word) {
+        Result::Ok(value) => value,
+        Result::Err(_) => revert_empty(),
+    }
+}
+
+fn checked(_ result: Result<CurveError, G1>) -> G1 {
+    match result {
+        Result::Ok(point) => point,
+        Result::Err(_) => revert_empty(),
+    }
+}
+
+fn words(_ point: G1) -> (u256, u256) {
+    let encoded = point.to_encoded()
+    (encoded.x.to_word(), encoded.y.to_word())
+}
+
+fn diagnostic(_ result: Result<CurveError, G1>) -> (u256, u256, u256) {
+    match result {
+        Result::Ok(point) => {
+            let encoded = point.to_encoded()
+            (0, encoded.x.to_word(), encoded.y.to_word())
+        },
+        Result::Err(error) => {
+            let code: u256 = match error {
+                CurveError::InvalidPoint => 1,
+                CurveError::AddCallFailed => 2,
+                CurveError::MulCallFailed => 3,
+                CurveError::PairingCallFailed => 7,
+                CurveError::InvalidPairingResult => 8,
+                CurveError::InvalidPointReturnLength => 4,
+                CurveError::InvalidPairingReturnLength => 9,
+                CurveError::InvalidMsmLength => 10,
+            }
+            (code, 0, 0)
+        },
+    }
+}

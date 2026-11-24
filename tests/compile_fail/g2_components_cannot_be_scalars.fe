@@ -1,0 +1,6 @@
+// expect: type mismatch
+use ingot::field::Fr
+use ingot::types::Fq2
+fn misuse(_ word: Fr) -> Fq2 {
+    Fq2 { imag: word, real: word }
+}

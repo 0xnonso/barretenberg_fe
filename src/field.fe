@@ -1,0 +1,298 @@
+use core::abi::{load_word, store_word}
+use core::ops::{Add, Eq, Mul, Neg, Sub}
+use core::ptr::{self, FixedMemBuffer}
+use core::result::Result
+use std::evm::crypto::{MODEXP_ADDRESS, addmod, mulmod}
+use std::evm::{Address, Call, Ctx}
+
+/// Order of the BN254 scalar field: used for constraint and proof arithmetic.
+pub const FR_MODULUS: u256 = 21888242871839275222246405745257275088548364400416034343698204186575808495617
+
+/// Modulus of the BN254 base field: used for curve coordinates.
+pub const FQ_MODULUS: u256 = 21888242871839275222246405745257275088696311157297823662689037894645226208583
+
+pub enum FieldDecodeError {
+    NonCanonicalScalar,
+    NonCanonicalCoordinate,
+}
+
+impl Copy for FieldDecodeError {}
+
+pub enum FieldArithmeticError {
+    ZeroInverse,
+    UnsupportedExponent,
+    ModexpCallFailed,
+    InvalidModexpReturnLength,
+    NonCanonicalModexpResult,
+}
+
+impl Copy for FieldArithmeticError {}
+
+/// Canonical scalar. The private representation must remain below FR_MODULUS.
+pub struct Fr { value: u256 }
+
+impl Copy for Fr {}
+
+#[inline(always)]
+pub(ingot) fn scalar_constant(_ word: u256) -> Fr {
+    if word >= FR_MODULUS {
+        core::panic()
+    }
+    Fr { value: word }
+}
+
+impl Fr {
+    pub const fn zero() -> Self {
+        Self { value: 0 }
+    }
+
+    pub const fn one() -> Self {
+        Self { value: 1 }
+    }
+
+    /// Use for external proof words. Never silently reduce malformed encodings.
+    pub fn from_word(_ word: u256) -> Result<FieldDecodeError, Self> {
+        if word >= FR_MODULUS {
+            Result::Err(FieldDecodeError::NonCanonicalScalar)
+        } else {
+            Result::Ok(Self { value: word })
+        }
+    }
+
+    /// Use only where the protocol explicitly reduces a hash modulo Fr.
+    pub fn from_hash_word(_ word: u256) -> Self {
+        Self { value: word % FR_MODULUS }
+    }
+
+    pub fn to_word(self) -> u256 {
+        self.value
+    }
+
+    /// Match the pinned Solidity pow helper: only positive powers of two.
+    pub fn pow(self, _ exponent: u256) -> Result<FieldArithmeticError, Self>
+    uses (call: Call, ctx: Ctx)
+    {
+        if exponent == 0 {
+            return Result::Err(FieldArithmeticError::UnsupportedExponent)
+        }
+        if (exponent & (exponent - 1)) != 0 {
+            return Result::Err(FieldArithmeticError::UnsupportedExponent)
+        }
+        self.modexp(exponent)
+    }
+
+    /// Fermat inversion: for nonzero a, a^(r-2) is its multiplicative inverse.
+    pub fn invert(self) -> Result<FieldArithmeticError, Self>
+    uses (call: Call, ctx: Ctx)
+    {
+        if self.value == 0 {
+            return Result::Err(FieldArithmeticError::ZeroInverse)
+        }
+        self.modexp(FR_MODULUS - 2)
+    }
+
+    /// Division can fail, so keep it explicit rather than overloading `/`.
+    pub fn divide(self, _ denominator: Self) -> Result<FieldArithmeticError, Self>
+    uses (call: Call, ctx: Ctx)
+    {
+        match denominator.invert() {
+            Result::Ok(inverse) => Result::Ok(self * inverse),
+            Result::Err(error) => Result::Err(error),
+        }
+    }
+
+    // Fixed MODEXP input: three 32-byte lengths, then base, exponent, modulus.
+    // Kept private so the public pow policy cannot be bypassed accidentally.
+    fn modexp(self, _ exponent: u256) -> Result<FieldArithmeticError, Self>
+    uses (call: Call, ctx: Ctx)
+    {
+        let input = FixedMemBuffer<192>::alloc()
+        unsafe {
+            store_word(ptr: input.ptr(), value: 32)
+            store_word(ptr: ptr::offset_bytes(input.ptr(), 32), value: 32)
+            store_word(ptr: ptr::offset_bytes(input.ptr(), 64), value: 32)
+            store_word(ptr: ptr::offset_bytes(input.ptr(), 96), value: self.value)
+            store_word(ptr: ptr::offset_bytes(input.ptr(), 128), value: exponent)
+            store_word(
+                ptr: ptr::offset_bytes(input.ptr(), 160),
+                value: FR_MODULUS,
+            )
+        }
+        var output = FixedMemBuffer<32>::alloc().into_buffer()
+        let outcome = call
+            .raw_staticcall(
+                addr: Address::new(MODEXP_ADDRESS),
+                gas: ctx.gas(),
+                args: input.span(),
+                ret: mut output,
+            )
+        if !outcome.success() {
+            return Result::Err(FieldArithmeticError::ModexpCallFailed)
+        }
+        if outcome.returndata_len() != 32 {
+            return Result::Err(FieldArithmeticError::InvalidModexpReturnLength)
+        }
+        let word = unsafe {
+            load_word(output.ptr())
+        }
+        match Self::from_word(word) {
+            Result::Ok(value) => Result::Ok(value),
+            Result::Err(_) => Result::Err(FieldArithmeticError::NonCanonicalModexpResult),
+        }
+    }
+}
+
+// The operator traits keep arithmetic typed: Fr + Fq is not defined.
+// addmod/mulmod reduce the full intermediate, without u256 truncation.
+impl Add for Fr {
+    fn add(own self, _ other: own Self) -> Self {
+        Self { value: addmod(self.value, other.value, FR_MODULUS) }
+    }
+}
+
+impl Sub for Fr {
+    fn sub(own self, _ other: own Self) -> Self {
+        // other < r, so r - other is safe, including other == 0.
+        Self { value: addmod(self.value, FR_MODULUS - other.value, FR_MODULUS) }
+    }
+}
+
+impl Mul for Fr {
+    fn mul(own self, _ other: own Self) -> Self {
+        Self { value: mulmod(self.value, other.value, FR_MODULUS) }
+    }
+}
+
+impl Neg for Fr {
+    fn neg(own self) -> Self {
+        // r represents zero mathematically, but is not a canonical Fr word.
+        if self.value == 0 {
+            Self::zero()
+        } else {
+            Self { value: FR_MODULUS - self.value }
+        }
+    }
+}
+
+impl Eq for Fr {
+    fn eq(self, _ other: Self) -> bool {
+        self.value == other.value
+    }
+}
+
+/// Canonical coordinate. This does not establish curve membership.
+pub struct Fq { value: u256 }
+
+impl Copy for Fq {}
+
+impl Fq {
+    /// Internal trust boundary: caller must establish word < FQ_MODULUS.
+    /// Successful BN254 precompile output supplies this guarantee. Untrusted
+    /// proof words must use from_word instead.
+    #[inline(always)]
+    pub(ingot) unsafe fn from_canonical_word_unchecked(_ word: u256) -> Self {
+        Self { value: word }
+    }
+
+    pub fn negate(self) -> Self {
+        if self.value == 0 {
+            self
+        } else {
+            Self { value: FQ_MODULUS - self.value }
+        }
+    }
+
+    pub fn from_word(_ word: u256) -> Result<FieldDecodeError, Self> {
+        if word >= FQ_MODULUS {
+            Result::Err(FieldDecodeError::NonCanonicalCoordinate)
+        } else {
+            Result::Ok(Self { value: word })
+        }
+    }
+
+    pub fn to_word(self) -> u256 {
+        self.value
+    }
+}
+
+#[inline(always)]
+pub(ingot) fn coordinate_constant(_ word: u256) -> Fq {
+    match Fq::from_word(word) {
+        Result::Ok(value) => value,
+        Result::Err(_) => core::panic(),
+    }
+}
+
+/// Protocol stages abort on an invalid denominator, matching the reference.
+/// The public Fr.invert API still exposes the recoverable typed error.
+pub(ingot) fn inverse(_ value: Fr) -> Fr uses (call: Call, ctx: Ctx) {
+    match value.invert() {
+        Result::Ok(result) => result,
+        Result::Err(error) => ingot::errors::arithmetic(error),
+    }
+}
+
+/// A scalar kept as numerator / denominator. Sums of quotients then need no
+/// MODEXP inversion until the value itself is required.
+pub struct Fraction { numerator: Fr, denominator: Fr }
+
+impl Copy for Fraction {}
+
+impl Fraction {
+    pub(ingot) fn numerator(self) -> Fr {
+        self.numerator
+    }
+
+    pub(ingot) fn denominator(self) -> Fr {
+        self.denominator
+    }
+
+    pub fn from(_ value: Fr) -> Self {
+        Self { numerator: value, denominator: Fr::one() }
+    }
+
+    pub fn add_quotient(self, _ value: Fr, _ divisor: Fr) -> Self {
+        Self {
+            numerator: self.numerator * divisor + value * self.denominator,
+            denominator: self.denominator * divisor,
+        }
+    }
+
+    pub fn scale(self, _ factor: Fr) -> Self {
+        Self { numerator: self.numerator * factor, denominator: self.denominator }
+    }
+
+    pub fn equals(self, _ value: Fr) -> bool {
+        self.denominator != Fr::zero() && value * self.denominator == self.numerator
+    }
+
+    pub fn evaluate(self) -> Result<FieldArithmeticError, Fr>
+    uses (call: Call, ctx: Ctx)
+    {
+        self.numerator.divide(self.denominator)
+    }
+}
+
+/// Montgomery's trick: replace values[0..len] by their inverses with one
+/// MODEXP and 3(len - 1) multiplications. A zero value reverts with the same
+/// InvertOfZero error as inverting it alone.
+pub(ingot) fn batch_invert<const N: usize>(_ values: mut [Fr; N], _ len: usize)
+uses (call: Call, ctx: Ctx)
+{
+    assert!(len <= N)
+    var scratch = ingot::arrays::Buffer<[Fr; N]>::new()
+    let prefix = mut scratch.get()
+    var product = Fr::one()
+    for i in 0 .. len {
+        prefix[i] = product
+        product = product * values[i]
+    }
+    var remaining = inverse(product)
+    var i = len
+    while i > 0 {
+        i -= 1
+        let value = values[i]
+        values[i] = remaining * prefix[i]
+        remaining = remaining * value
+    }
+}
